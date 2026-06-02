@@ -383,9 +383,9 @@ class HomeInterfaceTests(GuildTestBase):
     def test_home_dashboard_has_command_input(self) -> None:
         text = "\n".join(home.dashboard_lines(90, home.HomeState(command="status")))
 
-        self.assertIn("Output", text)
+        self.assertIn("Command output", text)
         self.assertIn("> status", text)
-        self.assertIn("Enter run", text)
+        self.assertIn("enter run", text)
 
     def test_home_embedded_command_normalizes_guild_prefix(self) -> None:
         self.assertEqual(home._normalize_command("guild status"), ["status"])

@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import curses
 import io
+import locale
 import shutil
 import shlex
 import sys
-import time
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 
-from . import __version__, config, render, roles, scorecard, state
+from . import __version__, config, roles, scorecard, state
 
 DEFAULT_WIDTH = 108
 MIN_WIDTH = 72
@@ -155,110 +155,104 @@ def model_rows() -> list[str]:
     ]
 
 
-def _hr(width: int) -> str:
-    return "-" * max(width, 0)
+# --- box drawing ----------------------------------------------------------------------------
+# Every emitted line is exactly `width` columns and carries its own left/right wall, so the right
+# edge is always a single straight vertical line. (The previous layout mixed full-width title
+# bars with walled rows, which made the right edge zig-zag and the columns drift.)
+
+_TL, _TR, _BL, _BR = "╭", "╮", "╰", "╯"   # ╭ ╮ ╰ ╯
+_HZ, _VT = "─", "│"                                 # ─ │
+_ML, _MR = "├", "┤"                                 # ├ ┤
+_DOT = "·"                                               # ·
 
 
-def _box(title: str, body: list[str], width: int) -> list[str]:
-    width = max(width, 48)
-    label = f" {title} "
-    top = "+" + label + "-" * max(width - len(label) - 2, 0) + "+"
-    inner = width - 4
-    lines = [top]
-    for line in body:
-        lines.append(f"| {_pad(line, inner)} |")
-    lines.append(_hr(width))
-    return lines
+def _box_top(title: str, width: int) -> str:
+    label = f" {title} " if title else ""
+    return _TL + label + _HZ * max(width - 2 - len(label), 0) + _TR
 
 
-def _border_top(width: int) -> str:
-    return "+" + "-" * max(width - 2, 0) + "+"
+def _box_bottom(width: int) -> str:
+    return _BL + _HZ * max(width - 2, 0) + _BR
 
 
-def _border_bottom(width: int) -> str:
-    return _border_top(width)
+def _box_div(width: int) -> str:
+    return _ML + _HZ * max(width - 2, 0) + _MR
 
 
-def _border_mid(left: str, right: str, width: int) -> str:
-    label = f" {left} "
-    right_label = f" {right} " if right else ""
-    fill = max(width - len(label) - len(right_label) - 2, 0)
-    return "+" + label + "-" * fill + right_label + "+"
+def _row(content: object, width: int) -> str:
+    inner = max(width - 4, 0)
+    return f"{_VT} {_pad(content, inner)} {_VT}"
 
 
-def _panel_line(left: str, right: str, left_width: int, right_width: int) -> str:
-    return f"| {_pad(left, left_width)} | {_pad(right, right_width)} |"
-
-
-def _pair_line(left_label: str, left_value: object, right_label: str, right_value: object,
-               width: int) -> str:
-    half = max((width - 3) // 2, 20)
-    left = f"{left_label}: {left_value}"
-    right = f"{right_label}: {right_value}"
-    return f"{_pad(left, half)} | {_pad(right, width - half - 3)}"
-
-
-def _overview_body(width: int) -> list[str]:
-    initialized = config.GUILD_DIR is not None
-    project = str(config.PROJECT_ROOT) if initialized else "not initialized here"
-    context = "ok" if (config.CONTEXT_PATH and config.CONTEXT_PATH.exists()) else "missing"
-    context_value = f"{config.PROJECT_DIRNAME}/context.md {context}" if initialized else "run `guild init`"
-    comp = config.setting("compaction", {}) or {}
-    inner = width - 4
-    return [
-        _pair_line("Project", project, "Context", context_value, inner),
-        _pair_line("Gating", config.setting("gating", config.DEFAULT_GATING),
-                   "Compaction", "on" if comp.get("enabled") else "off", inner),
-        _pair_line("Latest", _latest_summary(), "Config", "guild config list", inner),
-    ]
-
-
-def _api_body(width: int) -> list[str]:
-    inner = width - 4
-    fixed = 10 + 2 + 22 + 2 + 15 + 2 + 8 + 2 + 11 + 2 + 9 + 2
-    usage_width = max(inner - fixed, 12)
-    rows = [
-        f"{_pad('API/CLI', 10)}  {_pad('Roles', 22)}  {_pad('Selected model', 15)}  "
-        f"{_pad('Effort', 8)}  {_pad('Access', 11)}  {_pad('Status', 9)}  {_pad('Usage', usage_width)}",
-        "-" * inner,
-    ]
-    for row in agent_rows():
-        rows.append(
-            f"{_pad(row.agent, 10)}  {_pad(row.assigned_roles, 22)}  {_pad(row.model, 15)}  "
-            f"{_pad(row.effort, 8)}  {_pad(row.access, 11)}  {_pad(row.status, 9)}  {_pad(row.usage, usage_width)}"
-        )
+def _columns(left: list[str], right: list[str], width: int) -> list[str]:
+    """Two side-by-side columns sharing one box's inner width, each its own padded sub-field."""
+    inner = max(width - 4, 0)
+    gap = 3
+    left_w = max((inner - gap) // 2, 1)
+    right_w = max(inner - gap - left_w, 1)
+    height = max(len(left), len(right))
+    rows: list[str] = []
+    for index in range(height):
+        cell_l = left[index] if index < len(left) else ""
+        cell_r = right[index] if index < len(right) else ""
+        rows.append(_row(f"{_pad(cell_l, left_w)}{' ' * gap}{_pad(cell_r, right_w)}", width))
     return rows
 
 
-def _latest_body(width: int) -> list[str]:
-    data = _latest_data()
-    if not data:
-        return [
-            "No sessions yet.",
-            "Start one with: guild run \"<goal>\"",
-        ]
-    steps = data.get("steps", [])
-    done = sum(1 for step in steps if step.get("status") in (state.DONE, state.SKIPPED))
-    goal = str(data.get("goal", ""))
+# --- sections -------------------------------------------------------------------------------
+
+def _identity_lines() -> list[str]:
+    project = str(config.PROJECT_ROOT) if config.GUILD_DIR is not None else "not initialized"
     return [
-        f"Session: {data.get('id', '')}",
-        f"Status:  {data.get('status', 'unknown')}    Progress: {render.progress(done, len(steps), width=14)}",
-        f"Goal:    {goal}",
-        "Open:    guild monitor    guild report --open",
+        f"Project   {project}",
+        f"Gating    {config.setting('gating', config.DEFAULT_GATING)}",
+        f"Version   {__version__}",
+        f"Latest    {_latest_summary()}",
     ]
 
 
-def _actions_body() -> list[str]:
+def _quicklinks_lines() -> list[str]:
     return [
-        "Slash commands work inside this interface.",
-        "/status                 Show setup",
-        "/sessions               Browse previous runs",
-        "/report --open          Open latest Markdown report",
-        "/profiles               Show model/effort presets",
-        "/doctor                 Check agent CLIs",
-        "/clear                  Clear command output",
-        "run \"<goal>\"            Runs outside the home UI for full interactivity",
+        "Getting started",
+        "/status     inspect the resolved setup",
+        "/sessions   browse previous runs",
+        "/profiles   model & effort presets",
+        "/report     open the latest summary",
+        "/help       all slash commands",
     ]
+
+
+def _overview_section(width: int) -> list[str]:
+    return [
+        _box_top("Overview", width),
+        *_columns(_identity_lines(), _quicklinks_lines(), width),
+        _box_bottom(width),
+    ]
+
+
+def _agents_section(width: int) -> list[str]:
+    inner = max(width - 4, 0)
+    agent_w, roles_w, model_w, effort_w, access_w, status_w = 8, 20, 13, 7, 10, 10
+    fixed = agent_w + roles_w + model_w + effort_w + access_w + status_w + 6  # 6 separators
+    usage_w = max(inner - fixed, 6)
+
+    def cells(c1, c2, c3, c4, c5, c6, c7) -> str:
+        return (f"{_pad(c1, agent_w)} {_pad(c2, roles_w)} {_pad(c3, model_w)} {_pad(c4, effort_w)} "
+                f"{_pad(c5, access_w)} {_pad(c6, status_w)} {_pad(c7, usage_w)}")
+
+    lines = [
+        _box_top("API / CLI agents  " + _DOT + "  selected models / effort / usage", width),
+        _row(cells("API", "Roles", "Model", "Effort", "Access", "Status", "Usage"), width),
+        _box_div(width),
+    ]
+    for row in agent_rows():
+        lines.append(_row(
+            cells(row.agent, row.assigned_roles, row.model, row.effort,
+                  row.access, row.status, row.usage),
+            width,
+        ))
+    lines.append(_box_bottom(width))
+    return lines
 
 
 def _transcript_body(ui: HomeState) -> list[str]:
@@ -268,141 +262,35 @@ def _transcript_body(ui: HomeState) -> list[str]:
     return [ui.message]
 
 
-def _input_body(ui: HomeState, width: int) -> list[str]:
-    inner = width - 4
-    prompt = "> "
-    return [prompt + _clip(ui.command, max(inner - len(prompt), 1))]
-
-
-def _project_name() -> str:
-    if config.GUILD_DIR is None:
-        return "not initialized"
-    return str(config.PROJECT_ROOT)
-
-
-def _model_summary() -> str:
-    bits = []
-    for row in agent_rows():
-        bits.append(f"{row.agent}:{row.model}/{row.effort}")
-    return "  ".join(bits) if bits else "no agents configured"
-
-
-def _welcome_lines() -> list[str]:
+def _output_section(ui: HomeState, width: int) -> list[str]:
     return [
-        "Welcome to guild",
-        "",
-        "     ____  _   _ ___ _     ____",
-        "    / ___|| | | |_ _| |   |  _ \\",
-        "   | |  _ | | | || || |   | | | |",
-        "   | |_| || |_| || || |___| |_| |",
-        "    \\____| \\___/|___|_____|____/",
-        "",
-        f"Project  {_project_name()}",
-        f"Gating   {config.setting('gating', config.DEFAULT_GATING)}",
+        _box_top("Command output", width),
+        *[_row(line, width) for line in _transcript_body(ui)[-4:]],
+        _box_bottom(width),
     ]
 
 
-def _tips_lines() -> list[str]:
-    latest = _latest_summary()
+def _input_section(ui: HomeState, width: int) -> list[str]:
     return [
-        "Tips for getting started",
-        "Run init to create project context.",
-        "Run status for setup details.",
-        "Run config profiles for presets.",
-        "",
-        "Current setup",
-        f"Models  {_model_summary()}",
-        f"Latest  {latest}",
-    ]
-
-
-def _hero_lines(width: int) -> list[str]:
-    width = max(width, MIN_WIDTH)
-    inner = width - 4
-    gap = 3
-    left_width = max(32, inner // 2 - gap)
-    right_width = max(28, inner - left_width - gap)
-    left = _welcome_lines()
-    right = _tips_lines()
-    rows = max(len(left), len(right))
-    lines = [_border_top(width)]
-    for index in range(rows):
-        lines.append(_panel_line(
-            left[index] if index < len(left) else "",
-            right[index] if index < len(right) else "",
-            left_width,
-            right_width,
-        ))
-    lines.append(_border_bottom(width))
-    return lines
-
-
-def _notice_line(width: int) -> str:
-    return _clip(
-        "Type slash commands below - try /status, /sessions, /report --open, /profiles, /help",
-        width,
-    )
-
-
-def _agents_lines(width: int) -> list[str]:
-    width = max(width, MIN_WIDTH)
-    inner = width - 4
-    rows = [_border_mid("API / CLI agents", "selected models / effort / usage", width)]
-    usage_width = max(inner - 81, 10)
-    header = (
-        f"{_pad('API', 10)} {_pad('Roles', 24)} {_pad('Model', 14)} {_pad('Effort', 8)} "
-        f"{_pad('Access', 10)} {_pad('Status', 9)} {_pad('Usage', usage_width)}"
-    )
-    rows.append(f"| {_pad(header, inner)} |")
-    rows.append(f"| {_hr(inner)} |")
-    for row in agent_rows():
-        line = (
-            f"{_pad(row.agent, 10)} {_pad(row.assigned_roles, 24)} {_pad(row.model, 14)} "
-            f"{_pad(row.effort, 8)} {_pad(row.access, 10)} {_pad(row.status, 9)} "
-            f"{_pad(row.usage, usage_width)}"
-        )
-        rows.append(f"| {_pad(line, inner)} |")
-    rows.append(_border_bottom(width))
-    return rows
-
-
-def _transcript_lines(ui: HomeState, width: int) -> list[str]:
-    width = max(width, MIN_WIDTH)
-    body = _transcript_body(ui)[-4:]
-    return [
-        _border_mid("Output", "", width),
-        *[f"| {_pad(line, width - 4)} |" for line in body],
-        _border_bottom(width),
-    ]
-
-
-def _prompt_lines(ui: HomeState, width: int) -> list[str]:
-    width = max(width, MIN_WIDTH)
-    prompt = "> " + ui.command
-    return [
-        _hr(width),
-        _clip(prompt, width),
-        _hr(width),
-        "/help commands  |  Enter run  |  Tab complete  |  q quit",
+        _box_top("Command input", width),
+        _row("> " + ui.command, width),
+        _box_bottom(width),
+        f"  /help commands   {_DOT}   enter run   {_DOT}   tab complete   {_DOT}   /quit exit",
     ]
 
 
 def dashboard_lines(width: int = DEFAULT_WIDTH, ui: HomeState | None = None) -> list[str]:
     ui = ui or HomeState()
     width = max(width, MIN_WIDTH)
-    lines = [
-        f"{_pad('guild ' + __version__, 22)} agent team terminal",
-        _hr(width),
+    return [
+        *_overview_section(width),
+        "",
+        *_agents_section(width),
+        "",
+        *_output_section(ui, width),
+        "",
+        *_input_section(ui, width),
     ]
-    lines.extend(_hero_lines(width))
-    lines.append("")
-    lines.append(_notice_line(width))
-    lines.append("")
-    lines.extend(_agents_lines(width))
-    lines.append("")
-    lines.extend(_transcript_lines(ui, width))
-    lines.extend(_prompt_lines(ui, width))
-    return lines
 
 
 def home_lines() -> list[str]:
@@ -413,6 +301,12 @@ def open_home() -> None:
     if not sys.stdout.isatty():
         print("\n".join(home_lines()))
         return
+    # curses needs a UTF-8 locale to render the box-drawing characters; without this the
+    # borders show up as garbage on some terminals.
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except locale.Error:
+        pass
     curses.wrapper(_loop)
 
 
@@ -465,42 +359,52 @@ def _draw(stdscr: "curses.window", use_color: bool, ui: HomeState) -> None:
     for row, line in enumerate(lines[:max(height - 1, 0)]):
         attr = _line_attr(line, row, use_color)
         stdscr.addnstr(row, 0, line, width - 1, attr)
-    footer = f" q quit   r refresh   {time.strftime('%H:%M:%S')}"
-    stdscr.addnstr(height - 1, 0, footer.ljust(width - 1), width - 1, curses.A_REVERSE)
     stdscr.refresh()
 
 
+def _pair(index: int, use_color: bool) -> int:
+    return curses.color_pair(index) if use_color else 0
+
+
 def _line_attr(line: str, row: int, use_color: bool) -> int:
-    attr = 0
-    if row == 0:
-        attr |= curses.A_BOLD
-        return attr | (curses.color_pair(2) if use_color else 0)
-    if line.startswith("? shortcuts") or line.startswith("/help"):
-        return curses.A_DIM
-    if line.startswith(">"):
-        attr |= curses.A_BOLD
-        return attr | (curses.color_pair(2) if use_color else 0)
-    if line.startswith("-"):
-        return curses.A_DIM
-    if line.startswith("+"):
-        attr |= curses.A_BOLD
-        if not use_color:
-            return attr
-        if "Output" in line:
-            return attr | curses.color_pair(3)
+    if not line:
+        return 0
+    head = line[0]
+
+    # Box top border: bold title tinted by section.
+    if head == _TL:
+        accent = 2
         if "API / CLI" in line:
-            return attr | curses.color_pair(5)
-        return attr | curses.color_pair(2)
-    if " missing " in line or " error" in line or line.startswith("Unknown slash"):
-        return attr | (curses.color_pair(4) if use_color else 0)
-    if " available " in line:
-        return attr | (curses.color_pair(1) if use_color else 0)
-    if "Welcome to guild" in line or "Tips for getting started" in line:
-        attr |= curses.A_BOLD
-        return attr | (curses.color_pair(3) if use_color else 0)
-    if line.strip().startswith("/"):
-        return attr | (curses.color_pair(2) if use_color else 0)
-    return attr
+            accent = 5
+        elif "Command output" in line:
+            accent = 3
+        elif "Command input" in line:
+            accent = 2
+        elif "Overview" in line:
+            accent = 6
+        return curses.A_BOLD | _pair(accent, use_color)
+
+    # Bottom border and inner divider: quiet rails.
+    if head in (_BL, _ML):
+        return curses.A_DIM
+
+    # Content rows: tint by what the row carries.
+    if head == _VT:
+        body = line[1:].strip()
+        if " missing " in line or " error" in line.lower() or "Unknown slash" in line:
+            return _pair(4, use_color)
+        if " available " in line:
+            return _pair(1, use_color)
+        if body.startswith(">"):
+            return curses.A_BOLD | _pair(2, use_color)
+        if body.startswith("/"):
+            return _pair(2, use_color)
+        return 0
+
+    # Footer hint line beneath the input box.
+    if line.lstrip().startswith("/help"):
+        return curses.A_DIM
+    return 0
 
 
 def _normalize_command(raw: str) -> list[str]:
