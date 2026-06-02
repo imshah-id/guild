@@ -23,6 +23,14 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
+def _depends_on(raw: object) -> list[str]:
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return []
+
+
 def make_plan(session: state.Session) -> list[state.Step]:
     spec = roles.spec_for("planner")
     prompt = agents.assemble(
@@ -59,6 +67,7 @@ def make_plan(session: state.Session) -> list[state.Step]:
                 needs_human=bool(raw.get("needs_human", False)),
                 human_reason=str(raw.get("human_reason", "")).strip(),
                 parallel_group=str(raw.get("parallel_group", "")).strip(),
+                depends_on=_depends_on(raw.get("depends_on", [])),
             )
         )
     if not steps:

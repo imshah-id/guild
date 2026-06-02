@@ -47,6 +47,7 @@ class Step:
     needs_human: bool = False
     human_reason: str = ""
     parallel_group: str = ""
+    depends_on: list[str] = field(default_factory=list)
     changed_files: list[str] = field(default_factory=list)
     diff_stat: str = ""
     started: float = 0.0

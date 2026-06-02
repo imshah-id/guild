@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 
-from .. import config, render, roles, state
+from .. import config, render, roles, state, validation
 from ..pipeline import Pipeline, PipelineAbort
 from ..planner import PlanError, make_plan
 
@@ -89,6 +89,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         session.status = "failed"
         session.save()
         return 1
+
+    issues = validation.validate_steps(session.steps)
+    if issues:
+        render.say("")
+        render.say(render.section("plan validation"))
+        for line in validation.issue_lines(issues):
+            render.say(f"  {line}")
+        if validation.has_errors(issues):
+            render.say(f"{render.RED}planning produced an invalid plan; edit it with `guild plan {session.id}`{render.RESET}")
+            session.status = "planned"
+            session.save()
+            return 1
 
     if args.plan_only:
         render.say("")

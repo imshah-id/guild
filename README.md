@@ -55,6 +55,7 @@ guild plan                # inspect or edit that saved plan
 guild run "Add the XP ledger reducer, pure TS, with tests"               # let it build
 guild sessions            # list previous runs
 guild report              # print a Markdown report for the latest run
+guild report --open       # write and open .guild/runs/<id>/report.md
 guild monitor             # live dashboard, in a second pane
 guild monitor --plain     # one-shot text snapshot
 guild resume              # a run stopped early? pick up where it left off
@@ -68,6 +69,16 @@ re-runs from scratch, and anything you already approved isn't re-asked.
 For targeted recovery, use `guild retry <session> <step>` to reset one step by index or id, or
 `guild skip <session> <step>` to mark one step skipped. Add `--run` to either command to resume
 immediately.
+
+Plans can be validated before execution:
+
+```sh
+guild plan --validate
+guild plan --set 3 depends_on=01-research,02-implement --validate
+```
+
+Validation checks missing task text, invalid phases, duplicate ids, unknown or future
+dependencies, and parallel research groups that are split or impossible to run together.
 
 ## The team
 
@@ -118,6 +129,9 @@ guild completion zsh
 guild completion bash
 guild completion fish
 ```
+
+Completion scripts include top-level commands plus common subcommand flags such as
+`run --plan-only`, `plan --validate`, `report --open`, and `monitor --json`.
 
 ## Gating (where it stops for you)
 

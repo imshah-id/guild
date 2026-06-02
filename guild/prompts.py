@@ -64,14 +64,15 @@ Do NOT add review steps. The pipeline automatically reviews every implement step
 different agent. Keep the plan as short as the goal honestly needs, and order the steps so each
 can start once the steps before it are done. When multiple adjacent research steps are independent
 and may run at the same time, give them the same non-empty "parallel_group" string. Leave
-"parallel_group" empty for all other steps.
+"parallel_group" empty for all other steps. Use "depends_on" only when a step relies on a
+non-immediately-previous step; list earlier step ids, never later steps.
 
 Set "needs_human" to true for any step that would require a database migration, schema change,
 seed, or write, OR add a new dependency, OR run a destructive command. Put the reason in
 "human_reason". The pipeline will pause for explicit approval before such a step.
 
 Output ONLY a JSON object, with no surrounding prose, matching exactly this shape:
-{"steps":[{"phase":"research|implement|test","title":"short title","task":"precise, self-contained instructions for the agent","needs_human":false,"human_reason":"","parallel_group":""}]}
+{"steps":[{"phase":"research|implement|test","title":"short title","task":"precise, self-contained instructions for the agent","needs_human":false,"human_reason":"","parallel_group":"","depends_on":[]}]}
 """
 
 

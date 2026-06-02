@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import argparse
 
-from .. import config, render, state
+from .. import config, render, state, validation
 from ..pipeline import Pipeline, PipelineAbort
 from ._steps import find_step, plan_lines
 from .run import _interactive_gate
 
-_EDITABLE_FIELDS = {"phase", "title", "task", "needs_human", "human_reason", "parallel_group"}
+_EDITABLE_FIELDS = {"phase", "title", "task", "needs_human", "human_reason", "parallel_group", "depends_on"}
 
 
 def _load(session_id: str | None) -> state.Session | None:
@@ -33,9 +33,22 @@ def _set_field(step: state.Step, assignment: str) -> str | None:
         return "phase must be research, implement, or test"
     if field == "needs_human":
         setattr(step, field, _parse_bool(value))
+    elif field == "depends_on":
+        step.depends_on = [item.strip() for item in value.split(",") if item.strip()]
     else:
         setattr(step, field, value.strip())
     return None
+
+
+def _render_validation(session: state.Session) -> list[validation.PlanIssue]:
+    issues = validation.validate_steps(session.steps)
+    if not issues:
+        render.out("validation ok")
+        return issues
+    render.out("validation")
+    for line in validation.issue_lines(issues):
+        render.out(f"  {line}")
+    return issues
 
 
 def _apply_edits(session: state.Session, args: argparse.Namespace) -> str | None:
@@ -89,7 +102,16 @@ def cmd_plan(args: argparse.Namespace) -> int:
     for line in plan_lines(session):
         render.out(line)
 
+    issues: list[validation.PlanIssue] = []
+    if args.validate:
+        issues = _render_validation(session)
+
     if args.run:
+        if not issues:
+            issues = validation.validate_steps(session.steps)
+        if validation.has_errors(issues):
+            render.say(f"{render.RED}plan has validation errors; not running{render.RESET}")
+            return 1
         try:
             Pipeline(session, _interactive_gate, compact=not args.no_compact).run(resume=True)
         except PipelineAbort:
@@ -105,7 +127,8 @@ def register(subparsers) -> None:
     parser.add_argument("--move", action="append", nargs=2, metavar=("STEP", "POSITION"),
                         help="move a step to a 1-based position")
     parser.add_argument("--set", action="append", nargs=2, metavar=("STEP", "FIELD=VALUE"),
-                        help="edit phase, title, task, needs_human, human_reason, or parallel_group")
+                        help="edit phase, title, task, needs_human, human_reason, parallel_group, or depends_on")
+    parser.add_argument("--validate", action="store_true", help="validate dependencies and parallel groups")
     parser.add_argument("--run", action="store_true", help="run the edited plan immediately")
     parser.add_argument("--no-compact", action="store_true",
                         help="disable token-saving compaction while running")

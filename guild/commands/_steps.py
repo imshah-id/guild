@@ -34,5 +34,6 @@ def plan_lines(session: state.Session) -> list[str]:
     for index, step in enumerate(session.steps, start=1):
         flag = " [needs approval]" if step.needs_human else ""
         group = f" [parallel:{step.parallel_group}]" if step.parallel_group else ""
-        lines.append(f"  {index:>2}. {step.id:18} {step.phase:9} {step.status:14} {step.title}{flag}{group}")
+        deps = f" [depends:{','.join(step.depends_on)}]" if step.depends_on else ""
+        lines.append(f"  {index:>2}. {step.id:18} {step.phase:9} {step.status:14} {step.title}{flag}{group}{deps}")
     return lines

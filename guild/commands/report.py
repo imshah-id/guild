@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -78,6 +80,22 @@ def _load_session(session_id: str | None) -> state.Session | None:
     return state.Session.load(latest.name)
 
 
+def _open_command(path: Path, platform: str = sys.platform) -> list[str]:
+    if platform == "darwin":
+        return ["open", str(path)]
+    if platform.startswith("win"):
+        return ["cmd", "/c", "start", "", str(path)]
+    return ["xdg-open", str(path)]
+
+
+def _open_path(path: Path) -> bool:
+    try:
+        subprocess.Popen(_open_command(path), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     session = _load_session(args.id)
     if session is None:
@@ -86,10 +104,15 @@ def cmd_report(args: argparse.Namespace) -> int:
         return 1
 
     text = markdown_report(session)
-    if args.output:
-        path = Path(args.output)
+    if args.output or args.open:
+        path = Path(args.output) if args.output else session.dir / "report.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
         render.say(f"wrote {render.CYAN}{path}{render.RESET}")
+        if args.open:
+            if not _open_path(path):
+                render.say(f"{render.RED}could not open report:{render.RESET} no opener available")
+                return 1
     else:
         render.out(text.rstrip())
     return 0
@@ -99,4 +122,6 @@ def register(subparsers) -> None:
     parser = subparsers.add_parser("report", help="write a Markdown summary for a session")
     parser.add_argument("id", nargs="?", help="session id (default: the most recent)")
     parser.add_argument("-o", "--output", help="write the report to this path instead of stdout")
+    parser.add_argument("--open", action="store_true",
+                        help="write the report, then open it with the system viewer")
     parser.set_defaults(func=cmd_report, needs_project=True)

@@ -20,7 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from guild import (  # noqa: E402
     agents, compaction, config, context, monitor, pipeline, planner, prompts, render, roles,
-    scorecard, state,
+    scorecard, state, validation,
 )
 from guild.commands import completion as completion_cmd  # noqa: E402
 from guild.commands import init as init_cmd  # noqa: E402
@@ -306,6 +306,7 @@ class PlannerTests(GuildTestBase):
                     "needs_human": False,
                     "human_reason": "",
                     "parallel_group": "scout",
+                    "depends_on": ["00-prior"],
                 }
             ]
         })
@@ -314,6 +315,36 @@ class PlannerTests(GuildTestBase):
             steps = planner.make_plan(session)
 
         self.assertEqual(steps[0].parallel_group, "scout")
+        self.assertEqual(steps[0].depends_on, ["00-prior"])
+
+
+class ValidationTests(unittest.TestCase):
+    def test_validates_dependencies_and_split_parallel_groups(self) -> None:
+        steps = [
+            state.Step(id="01-research", phase=state.RESEARCH, title="a", task="a",
+                       parallel_group="scout"),
+            state.Step(id="02-implement", phase=state.IMPLEMENT, title="b", task="b"),
+            state.Step(id="03-research", phase=state.RESEARCH, title="c", task="c",
+                       parallel_group="scout", depends_on=["04-test"]),
+            state.Step(id="04-test", phase=state.TEST, title="d", task="d"),
+        ]
+
+        lines = validation.issue_lines(validation.validate_steps(steps))
+
+        self.assertTrue(any("parallel_group 'scout' is split" in line for line in lines))
+        self.assertTrue(any("dependency '04-test' must appear before" in line for line in lines))
+
+    def test_validates_clean_plan(self) -> None:
+        steps = [
+            state.Step(id="01-research", phase=state.RESEARCH, title="a", task="a",
+                       parallel_group="scout"),
+            state.Step(id="02-research", phase=state.RESEARCH, title="b", task="b",
+                       parallel_group="scout"),
+            state.Step(id="03-implement", phase=state.IMPLEMENT, title="c", task="c",
+                       depends_on=["01-research"]),
+        ]
+
+        self.assertEqual(validation.validate_steps(steps), [])
 
 
 # --- status smoke ------------------------------------------------------------------------
@@ -447,7 +478,11 @@ class SessionCommandTests(GuildTestBase):
         args = argparse.Namespace(
             drop=[],
             move=[["2", "1"]],
-            set=[["02-test", "title=renamed"], ["02-test", "parallel_group=batch"]],
+            set=[
+                ["02-test", "title=renamed"],
+                ["02-test", "parallel_group=batch"],
+                ["02-test", "depends_on=01-research"],
+            ],
         )
 
         error = plan_cmd._apply_edits(session, args)
@@ -456,6 +491,24 @@ class SessionCommandTests(GuildTestBase):
         self.assertEqual([s.id for s in session.steps], ["02-test", "01-research"])
         self.assertEqual(session.steps[0].title, "renamed")
         self.assertEqual(session.steps[0].parallel_group, "batch")
+        self.assertEqual(session.steps[0].depends_on, ["01-research"])
+
+    def test_report_open_writes_default_report_path(self) -> None:
+        session = state.Session.new("open report", "guided")
+        session.steps = [state.Step(id="01-test", phase=state.TEST, title="tests", task="run")]
+        session.save()
+
+        with mock.patch.object(report_cmd, "_open_path", return_value=True) as opened:
+            rc = report_cmd.cmd_report(argparse.Namespace(id=session.id, output=None, open=True))
+
+        self.assertEqual(rc, 0)
+        self.assertTrue((session.dir / "report.md").exists())
+        opened.assert_called_once_with(session.dir / "report.md")
+
+    def test_report_open_command_by_platform(self) -> None:
+        path = pathlib.Path("/tmp/report.md")
+        self.assertEqual(report_cmd._open_command(path, "darwin"), ["open", str(path)])
+        self.assertEqual(report_cmd._open_command(path, "linux")[0], "xdg-open")
 
     def test_retry_resets_step_and_removes_generated_followups(self) -> None:
         session = state.Session.new("retry me", "guided")
@@ -516,6 +569,9 @@ class SessionCommandTests(GuildTestBase):
     def test_completion_scripts_include_commands(self) -> None:
         self.assertIn("guild", completion_cmd._bash())
         self.assertIn("resume", completion_cmd._fish())
+        self.assertIn("--plan-only", completion_cmd._bash())
+        self.assertIn("--open", completion_cmd._zsh())
+        self.assertIn("-l open", completion_cmd._fish())
 
     def test_run_profile_override_applies_before_flags(self) -> None:
         args = argparse.Namespace(profile="fast", model=None, effort="high")
