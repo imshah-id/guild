@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guild-cli"
+version = "0.1.0"
+description = "A master CLI that runs your installed AI coding CLIs as a team: one plans and reviews, others implement, test, and research. No model APIs, no cloud: it drives the CLIs as subprocesses and coordinates them through files."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "guild" }]
+keywords = ["ai", "agents", "cli", "claude", "codex", "orchestration"]
+dependencies = []
+
+[project.scripts]
+guild = "guild.cli:main"
+
+[tool.setuptools]
+packages = ["guild", "guild.commands"]
