@@ -15,5 +15,18 @@ def load_brief() -> str:
         return ""
 
 
+def load_rules() -> str:
+    """The project's engineering rule packs from `.guild/rules.md`, or "" if there are none.
+    Injected into every agent prompt alongside the brief so the whole team builds to the same
+    standard."""
+    path = config.RULES_PATH
+    if path is None:
+        return ""
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+
 def has_brief() -> bool:
     return bool(load_brief().strip())

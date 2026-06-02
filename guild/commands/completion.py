@@ -6,12 +6,13 @@ import argparse
 from .. import render
 
 _COMMANDS = (
-    "init status run plan sessions report timeline label unlabel note resume retry skip monitor config research implement "
+    "init roles status run plan sessions report timeline label unlabel note resume retry skip monitor config research implement "
     "test review doctor scorecard completion"
 )
 
 _OPTIONS: dict[str, str] = {
-    "init": "--analyze --preset --force",
+    "init": "--analyze --preset --force --rules --no-rules --yes -y",
+    "roles": "list set edit reset --global planner researcher implementer reviewer tester claude codex agy",
     "run": "--gating --profile --plan-only --no-compact --model --effort --planner --researcher --implementer --reviewer --tester",
     "plan": "--drop --move --set --validate --run --no-compact",
     "sessions": "--limit -n --status --label --query -q planning running done failed blocked aborted",

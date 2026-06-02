@@ -155,6 +155,7 @@ PROJECT_ROOT: Path = Path.cwd()
 GUILD_DIR: Path | None = None
 RUNS_DIR: Path = Path.cwd() / PROJECT_DIRNAME / "runs"
 CONTEXT_PATH: Path | None = None
+RULES_PATH: Path | None = None
 PROJECT_ROLES_DIR: Path | None = None
 SETTINGS: dict = copy.deepcopy(DEFAULTS)
 SOURCES: dict = {}
@@ -196,7 +197,8 @@ def activate(start: Path | None = None) -> Path | None:
     module globals. Returns the project root, or None if the CWD is not inside a guild project.
     Safe to call even when uninitialized; commands that require a project check GUILD_DIR.
     """
-    global PROJECT_ROOT, GUILD_DIR, RUNS_DIR, CONTEXT_PATH, PROJECT_ROLES_DIR, SETTINGS, SOURCES
+    global PROJECT_ROOT, GUILD_DIR, RUNS_DIR, CONTEXT_PATH, RULES_PATH, PROJECT_ROLES_DIR
+    global SETTINGS, SOURCES
     project_root = find_project_root(start)
     SETTINGS, SOURCES = resolve(project_root)
     _refresh_constants()
@@ -205,12 +207,14 @@ def activate(start: Path | None = None) -> Path | None:
         GUILD_DIR = project_root / PROJECT_DIRNAME
         RUNS_DIR = GUILD_DIR / "runs"
         CONTEXT_PATH = GUILD_DIR / "context.md"
+        RULES_PATH = GUILD_DIR / "rules.md"
         PROJECT_ROLES_DIR = GUILD_DIR / "roles"
     else:
         PROJECT_ROOT = (start or Path.cwd()).resolve()
         GUILD_DIR = None
         RUNS_DIR = PROJECT_ROOT / PROJECT_DIRNAME / "runs"
         CONTEXT_PATH = None
+        RULES_PATH = None
         PROJECT_ROLES_DIR = None
     return project_root
 

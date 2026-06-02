@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONPATH=. python3 -c ' *)"
+    ]
+  }
+}

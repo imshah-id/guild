@@ -28,11 +28,16 @@ class AgentResult:
 
 
 def assemble(role_brief: str, task: str) -> str:
-    """Project brief + role brief + task spec: the full prompt every agent receives."""
+    """Project brief + engineering rules + role brief + task spec: the full prompt every agent
+    receives. The rules (`.guild/rules.md`) ride alongside the project brief so every role builds
+    to the same naming, type-safety, and programming standards."""
     parts: list[str] = []
     brief = context.load_brief()
     if brief.strip():
         parts += [brief, "\n\n---\n\n"]
+    rules = context.load_rules()
+    if rules.strip():
+        parts += [rules, "\n\n---\n\n"]
     parts += [role_brief, "\n\n---\n\n## Task\n\n", task, "\n"]
     return "".join(parts)
 

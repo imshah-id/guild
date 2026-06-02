@@ -50,6 +50,7 @@ class HomeState:
 _EMBEDDED_BLOCKED = {"run", "resume", "monitor", "research", "implement", "test", "review"}
 _SLASH_COMMANDS: dict[str, list[str]] = {
     "/status": ["status"],
+    "/roles": ["roles"],
     "/sessions": ["sessions"],
     "/report": ["report"],
     "/timeline": ["timeline"],
@@ -151,6 +152,7 @@ def help_lines() -> list[str]:
     return [
         "Slash commands",
         "/status      show resolved setup",
+        "/roles       view or change role assignments",
         "/sessions    browse previous runs",
         "/timeline    show latest run events",
         "/agents      inspect agent usage detail",
@@ -292,6 +294,7 @@ def _quicklinks_lines() -> list[str]:
     return [
         "Getting started",
         "/status     inspect the resolved setup",
+        "/roles      change role assignments",
         "/sessions   browse previous runs",
         "/timeline   show the latest run events",
         "/agents     inspect agent usage detail",

@@ -20,7 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from guild import (  # noqa: E402
     agents, compaction, config, context, home, monitor, pipeline, planner, prompts, render, roles,
-    scorecard, state, validation,
+    rules, scorecard, state, validation,
 )
 from guild.commands import completion as completion_cmd  # noqa: E402
 from guild.commands import doctor as doctor_cmd  # noqa: E402
@@ -29,6 +29,7 @@ from guild.commands import plan as plan_cmd  # noqa: E402
 from guild.commands import recovery as recovery_cmd  # noqa: E402
 from guild.commands import report as report_cmd  # noqa: E402
 from guild.commands import resume as resume_cmd  # noqa: E402
+from guild.commands import roles_cmd  # noqa: E402
 from guild.commands import run as run_cmd  # noqa: E402
 from guild.commands import session_meta as session_meta_cmd  # noqa: E402
 from guild.commands import sessions as sessions_cmd  # noqa: E402
@@ -55,6 +56,7 @@ class GuildTestBase(unittest.TestCase):
             "SOURCES": copy.deepcopy(config.SOURCES),
             "RUNS_DIR": config.RUNS_DIR,
             "CONTEXT_PATH": config.CONTEXT_PATH,
+            "RULES_PATH": config.RULES_PATH,
             "GUILD_DIR": config.GUILD_DIR,
             "PROJECT_ROOT": config.PROJECT_ROOT,
             "PROJECT_ROLES_DIR": config.PROJECT_ROLES_DIR,
@@ -66,6 +68,7 @@ class GuildTestBase(unittest.TestCase):
         config.PROJECT_ROOT = pathlib.Path(self._tmp)
         config.RUNS_DIR = pathlib.Path(self._tmp) / "runs"
         config.CONTEXT_PATH = None
+        config.RULES_PATH = None
         config.GUILD_DIR = None
         config.PROJECT_ROLES_DIR = None
 
@@ -77,6 +80,7 @@ class GuildTestBase(unittest.TestCase):
         config._refresh_constants()
         config.RUNS_DIR = self._saved["RUNS_DIR"]
         config.CONTEXT_PATH = self._saved["CONTEXT_PATH"]
+        config.RULES_PATH = self._saved["RULES_PATH"]
         config.GUILD_DIR = self._saved["GUILD_DIR"]
         config.PROJECT_ROOT = self._saved["PROJECT_ROOT"]
         config.PROJECT_ROLES_DIR = self._saved["PROJECT_ROLES_DIR"]
@@ -371,6 +375,114 @@ class InitScaffoldTests(GuildTestBase):
         text = init_cmd._context_template("strict-ts")
         self.assertIn("no `any`", text)
         self.assertIn("## Build, run, test", text)
+
+    def test_scaffold_writes_rules_and_chosen_roles(self) -> None:
+        target = pathlib.Path(self._tmp) / "proj" / ".guild"
+        init_cmd.write_scaffold(target, rule_packs=["type-safety", "naming"],
+                                roles_map={**config.DEFAULTS["roles"], "reviewer": "agy"},
+                                gating="hands-off")
+        rules_text = (target / "rules.md").read_text()
+        self.assertIn("## Type safety", rules_text)
+        self.assertIn("## Naming", rules_text)
+        self.assertNotIn("## Security", rules_text)
+        cfg = json.loads((target / "config.json").read_text())
+        self.assertEqual(cfg["roles"]["reviewer"], "agy")
+        self.assertEqual(cfg["gating"], "hands-off")
+
+    def test_scaffold_with_no_rules_skips_rules_file(self) -> None:
+        target = pathlib.Path(self._tmp) / "proj" / ".guild"
+        init_cmd.write_scaffold(target, rule_packs=[])
+        self.assertFalse((target / "rules.md").exists())
+
+    def test_init_flag_dispatches_to_init(self) -> None:
+        project = pathlib.Path(self._tmp) / "viaflag"
+        project.mkdir()
+        old = os.getcwd()
+        os.chdir(project)
+        try:
+            rc = cli_mod.main(["--init"])  # non-interactive: stdin is not a tty under the runner
+        finally:
+            os.chdir(old)
+        self.assertEqual(rc, 0)
+        self.assertTrue((project / ".guild" / "config.json").exists())
+        self.assertTrue((project / ".guild" / "rules.md").exists())
+
+
+# --- engineering rule packs --------------------------------------------------------------
+
+class RulePackTests(GuildTestBase):
+    def test_default_packs_render_with_headings(self) -> None:
+        text = rules.render_rules(rules.DEFAULT_PACKS)
+        self.assertIn("# Engineering rules", text)
+        self.assertIn("## Type safety", text)
+        self.assertIn("## Naming", text)
+        self.assertIn("## Programming", text)
+
+    def test_normalize_drops_unknown_and_orders_canonically(self) -> None:
+        self.assertEqual(rules.normalize(["naming", "bogus", "type-safety"]),
+                         ["type-safety", "naming"])
+
+    def test_empty_selection_renders_nothing(self) -> None:
+        self.assertEqual(rules.render_rules([]), "")
+
+    def test_rules_are_injected_into_every_prompt(self) -> None:
+        guild_dir = pathlib.Path(self._tmp) / ".guild"
+        guild_dir.mkdir(parents=True)
+        (guild_dir / "rules.md").write_text("# Engineering rules\n\n## Naming\n- be clear\n")
+        config.GUILD_DIR = guild_dir
+        config.RULES_PATH = guild_dir / "rules.md"
+        config.CONTEXT_PATH = guild_dir / "context.md"
+        prompt_text = agents.assemble("ROLE BRIEF", "DO THE TASK")
+        self.assertIn("Engineering rules", prompt_text)
+        self.assertIn("be clear", prompt_text)
+        self.assertIn("DO THE TASK", prompt_text)
+
+
+# --- roles command -----------------------------------------------------------------------
+
+class RolesCommandTests(GuildTestBase):
+    def _project(self) -> pathlib.Path:
+        guild_dir = pathlib.Path(self._tmp) / ".guild"
+        guild_dir.mkdir(parents=True, exist_ok=True)
+        (guild_dir / "config.json").write_text(json.dumps({"roles": dict(config.DEFAULTS["roles"])}) + "\n")
+        config.GUILD_DIR = guild_dir
+        return guild_dir
+
+    def test_set_writes_role_to_project_config(self) -> None:
+        guild_dir = self._project()
+        args = argparse.Namespace(action="set", role="reviewer", agent="agy", use_global=False)
+        rc = roles_cmd.cmd_roles(args)
+        self.assertEqual(rc, 0)
+        cfg = json.loads((guild_dir / "config.json").read_text())
+        self.assertEqual(cfg["roles"]["reviewer"], "agy")
+
+    def test_set_rejects_unknown_agent(self) -> None:
+        self._project()
+        args = argparse.Namespace(action="set", role="reviewer", agent="bogus", use_global=False)
+        self.assertEqual(roles_cmd.cmd_roles(args), 1)
+
+    def test_set_rejects_unknown_role(self) -> None:
+        self._project()
+        args = argparse.Namespace(action="set", role="captain", agent="codex", use_global=False)
+        self.assertEqual(roles_cmd.cmd_roles(args), 1)
+
+    def test_reset_restores_defaults(self) -> None:
+        guild_dir = self._project()
+        config.write_setting(guild_dir / "config.json", "roles.reviewer", "agy")
+        args = argparse.Namespace(action="reset", role=None, agent=None, use_global=False)
+        self.assertEqual(roles_cmd.cmd_roles(args), 0)
+        cfg = json.loads((guild_dir / "config.json").read_text())
+        self.assertEqual(cfg["roles"], dict(config.DEFAULTS["roles"]))
+
+    def test_set_without_project_fails(self) -> None:
+        config.GUILD_DIR = None
+        args = argparse.Namespace(action="set", role="reviewer", agent="agy", use_global=False)
+        self.assertEqual(roles_cmd.cmd_roles(args), 1)
+
+    def test_list_runs_without_a_project(self) -> None:
+        config.GUILD_DIR = None
+        args = argparse.Namespace(action="list", role=None, agent=None, use_global=False)
+        self.assertEqual(roles_cmd.cmd_roles(args), 0)
 
 
 class PlannerTests(GuildTestBase):

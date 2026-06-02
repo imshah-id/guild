@@ -48,9 +48,12 @@ bash install.sh --local /path/to/guild
 
 ```sh
 cd your-project
-guild init                # writes .guild/ (context.md + config.json) into this repo
+guild init                # set up .guild/ : pick rule packs, assign agents to roles, choose gating
+#   guild --init          # same thing; the bare flag form
+#   guild init --yes      # accept every default, no prompts
 #   guild init --analyze  # have the planner scan the repo and draft context.md for you
 $EDITOR .guild/context.md # tell the team what the project is and its rules
+guild roles               # see or change which agent plays each role
 guild                     # open the terminal interface
 guild status              # see the resolved setup at a glance
 guild run "Add the XP ledger reducer, pure TS, with tests" --plan-only   # preview the plan
@@ -68,6 +71,22 @@ guild report --open       # write and open .guild/runs/<id>/report.md
 guild monitor             # live dashboard, in a second pane
 guild monitor --plain     # one-shot text snapshot
 guild resume              # a run stopped early? pick up where it left off
+```
+
+`guild init` is interactive on a real terminal and walks you, default-first (just press Enter),
+through three things: which **engineering rule packs** to enforce, which **agent plays each
+role**, and the **gating** mode. The rule packs ship with guild — naming, type safety, and
+programming standards by default, with security and testing available — and are written to
+`.guild/rules.md` and injected into every agent prompt, so the whole team builds to the same
+standard and the reviewer enforces it. Nothing is fetched over the network. Pass `--yes` (or pipe
+it / run it in CI) to take every default without prompts, `--rules a,b,c` / `--no-rules` to pick
+packs up front, and `--force` to regenerate. Change role assignments any time with `guild roles`:
+
+```sh
+guild roles                      # show each role, its agent, capability, and availability
+guild roles set reviewer codex   # reassign one role            (--global for the user-wide config)
+guild roles edit                 # walk through every role interactively
+guild roles reset                # restore the default assignment
 ```
 
 A run that stops short — a timeout, Ctrl-C, a sleeping laptop, or an abort at a gate — leaves its
@@ -194,6 +213,7 @@ script-friendly snapshots.
 .guild/
   config.json     project settings (roles, agent models/efforts, gating, ...)
   context.md      the brief every agent loads (the source of truth for your project)
+  rules.md        engineering rule packs injected into every prompt (naming, types, ...)
   roles/          optional per-project role-brief overrides (else built-ins are used)
   runs/           one dir per session (gitignored): prompt, result, logs, state.json
 ```
@@ -203,11 +223,13 @@ script-friendly snapshots.
 ```
 guild/
   cli.py            arg parsing + dispatch
-  commands/         run, plan, retry/skip, sessions, report, timeline, metadata, status, monitor
+  commands/         init, roles, run, plan, retry/skip, sessions, report, status, monitor, config
   config.py         layered config + project discovery
-  roles.py          abstract roles, role->agent resolution, cross-review rule
+  roles.py          abstract roles, availability/scorecard-aware resolution, cross-review rule
   agents.py         agent adapters (claude/codex/agy), capability-aware, testable cmd builders
-  context.py        loads the project brief
+  context.py        loads the project brief and rule packs
+  rules.py          built-in engineering rule packs seeded by init, injected into prompts
+  prompt.py         tiny interactive prompts (degrade to defaults when not a terminal)
   planner.py        the planner decomposes a goal into a JSON plan
   pipeline.py       the engine: execute, auto cross-review, fix loop, gates
   state.py          session/step model, atomic state.json

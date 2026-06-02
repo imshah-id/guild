@@ -1,6 +1,7 @@
 """guild: run your installed AI coding CLIs as a coordinated team.
 
   guild init [--analyze]              bootstrap .guild/ for the current project
+  guild roles [set <role> <agent>]    see or change which agent plays each role
   guild status                        resolved roles, agents, gating, latest session
   guild run "<goal>"                  autonomous: plan, build, cross-review, test, report
   guild plan [id]                     inspect or edit a saved plan
@@ -23,7 +24,7 @@ import argparse
 
 from . import __version__, config, home
 from .commands import (
-    completion, config_cmd, doctor, init, monitor, plan, recovery, report, resume, run,
+    completion, config_cmd, doctor, init, monitor, plan, recovery, report, resume, roles_cmd, run,
     scorecard_cmd, session_meta, sessions, single, status, timeline,
 )
 
@@ -36,11 +37,14 @@ def build_parser() -> argparse.ArgumentParser:
                     "as subprocesses and coordinated through files.",
     )
     parser.add_argument("--version", action="version", version=f"guild {__version__}")
+    parser.add_argument("--init", action="store_true",
+                        help="bootstrap .guild/ in the current directory (same as `guild init`)")
     sub = parser.add_subparsers(dest="cmd", metavar="<command>")
 
     # Order here is the order shown in --help.
     init.register(sub)
     status.register(sub)
+    roles_cmd.register(sub)
     run.register(sub)
     plan.register(sub)
     sessions.register(sub)
@@ -63,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     config.activate()  # discover the project (if any) and load merged settings
     if not getattr(args, "cmd", None):
+        if getattr(args, "init", False):
+            return int(init.cmd_init(init.default_args()))
         home.open_home()
         return 0
     return int(args.func(args))
