@@ -71,6 +71,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         render.say(f"{render.RED}{error}{render.RESET}")
         return 1
 
+    issues = roles.availability_issues()
+    if issues:
+        render.say(f"{render.RED}cannot start the run:{render.RESET}")
+        for issue in issues:
+            render.say(f"  - {issue}")
+        render.say(render.kv("check", "guild doctor"))
+        return 1
+
     gating = args.gating or config.setting("gating", config.DEFAULT_GATING)
     session = state.Session.new(args.goal, gating)
     session.save()

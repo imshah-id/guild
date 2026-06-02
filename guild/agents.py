@@ -195,7 +195,9 @@ def run(spec: AgentSpec, capability: str, prompt: str, run_dir: Path, *, timeout
 
 
 def run_role(role: str, task: str, run_dir: Path, *, timeout: int) -> AgentResult:
-    """Convenience for single-agent one-offs: resolve the role's spec, brief, and capability."""
-    spec = roles.spec_for(role)
+    """Convenience for single-agent one-offs: resolve the role's spec, brief, and capability.
+    Routing is availability-aware, so a one-off falls back to an installed agent if the configured
+    one is missing."""
+    spec = roles.resolve_role(role).spec
     prompt = assemble(roles.brief_for(role), task)
     return run(spec, roles.capability_for(role), prompt, run_dir, timeout=timeout)

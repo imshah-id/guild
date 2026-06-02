@@ -51,6 +51,34 @@ class Pipeline:
         self.gate = gate
         self.compact = compact and config.COMPACTION_ENABLED
         self.notes: list[str] = []
+        self._reported_routing: set[str] = set()
+
+    # --- agent assignment -------------------------------------------------------------
+
+    def _assign(self, role: str, *, exclude: set[str] | None = None) -> roles.AgentSpec:
+        """Resolve the agent for a role (availability- and scorecard-aware) and note once if the
+        configured agent had to be substituted, so routing is never silent."""
+        assignment = roles.resolve_role(role, exclude=exclude)
+        self._note_routing(role, assignment)
+        return assignment.spec
+
+    def _assign_reviewer(self, author_agent: str) -> roles.AgentSpec:
+        assignment = roles.reviewer_assignment(author_agent)
+        self._note_routing("reviewer", assignment)
+        return assignment.spec
+
+    def _note_routing(self, role: str, assignment: roles.Assignment) -> None:
+        if not assignment.fallback_from:
+            return
+        key = f"{role}:{assignment.fallback_from}->{assignment.spec.name}:{assignment.reason}"
+        if key in self._reported_routing:
+            return
+        self._reported_routing.add(key)
+        render.say(render.kv(
+            "routing",
+            f"{render.YELLOW}{role}{render.RESET}: {assignment.fallback_from} -> "
+            f"{render.CYAN}{assignment.spec.name}{render.RESET}  {render.DIM}({assignment.reason}){render.RESET}",
+        ))
 
     # --- run-dir + state helpers ------------------------------------------------------
 
@@ -212,7 +240,7 @@ class Pipeline:
     # --- per-phase work ---------------------------------------------------------------
 
     def _do_research(self, step: Step) -> None:
-        spec = roles.spec_for("researcher")
+        spec = self._assign("researcher")
         self._begin(step, spec.name)
         with render.Spinner(f"{spec.name} researching: {step.title}"):
             result = agents.run(
@@ -242,7 +270,7 @@ class Pipeline:
         return group if len(group) > 1 else []
 
     def _do_research_group(self, steps: list[Step]) -> None:
-        spec = roles.spec_for("researcher")
+        spec = self._assign("researcher")
         for step in steps:
             self._begin(step, spec.name)
 
@@ -273,7 +301,7 @@ class Pipeline:
                 self.notes.append(f"[{step.title}] {_first_paragraph(result.text, config.RESEARCH_NOTE_CHARS)}")
 
     def _do_implement(self, step: Step) -> bool:
-        spec = roles.spec_for("implementer")
+        spec = self._assign("implementer")
         self._begin(step, spec.name)
         with render.Spinner(f"{spec.name} implementing: {step.title}"):
             result = agents.run(
@@ -307,7 +335,7 @@ class Pipeline:
         self._run_review(impl_step, review)
 
     def _run_review(self, impl_step: Step, review: Step) -> None:
-        spec = roles.reviewer_spec(impl_step.agent)
+        spec = self._assign_reviewer(impl_step.agent)
         self._begin(review, spec.name)
         with render.Spinner(f"{spec.name} reviewing: {impl_step.title}"):
             result = agents.run(
@@ -343,7 +371,7 @@ class Pipeline:
         self._save()
 
     def _do_test(self, step: Step, index: int) -> None:
-        spec = roles.spec_for("tester")
+        spec = self._assign("tester")
         self._begin(step, spec.name)
         with render.Spinner(f"{spec.name} testing: {step.title}"):
             result = agents.run(

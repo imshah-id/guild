@@ -32,7 +32,7 @@ def _depends_on(raw: object) -> list[str]:
 
 
 def make_plan(session: state.Session) -> list[state.Step]:
-    spec = roles.spec_for("planner")
+    spec = roles.resolve_role("planner").spec
     prompt = agents.assemble(
         roles.brief_for("planner"),
         prompts.PLANNER_INSTRUCTIONS + f"\n\n## Goal\n\n{session.goal}\n",

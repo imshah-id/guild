@@ -141,6 +141,26 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             ok = False
 
     render.out("")
+    render.out(f"{render.BOLD}routing{render.RESET} "
+               f"{render.DIM}(role -> agent that will actually run){render.RESET}")
+    for role in roles.ROLES:
+        try:
+            assignment = roles.resolve_role(role)
+        except roles.RoleError as exc:
+            render.out(f"  {render.RED}MISS{render.RESET} {role:12} {exc}")
+            ok = False
+            continue
+        resolved = assignment.spec.name
+        if not roles.installed(resolved):
+            render.out(f"  {render.RED}MISS{render.RESET} {role:12} {resolved} not on PATH")
+            ok = False
+        elif assignment.fallback_from:
+            render.out(f"  {render.YELLOW}sub {render.RESET} {role:12} "
+                       f"{assignment.fallback_from} -> {resolved}  {render.DIM}({assignment.reason}){render.RESET}")
+        else:
+            render.out(f"  {render.GREEN}ok  {render.RESET} {role:12} {resolved}")
+
+    render.out("")
     render.out(f"{render.BOLD}config{render.RESET}")
     conflict = roles.cross_review_conflict()
     if conflict:

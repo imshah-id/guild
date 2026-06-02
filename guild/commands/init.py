@@ -63,7 +63,7 @@ def write_scaffold(target: Path, *, preset: str = "minimal", context_text: str |
 def _analyze_context(target: Path) -> str | None:
     """Run the planner agent read-only to draft a project brief. Returns the draft, or None."""
     config.activate()  # no project yet; sets PROJECT_ROOT to CWD so the agent scans here
-    spec = roles.spec_for("planner")
+    spec = roles.resolve_role("planner").spec
     prompt = agents.assemble(roles.brief_for("planner"), prompts.ANALYZE_INSTRUCTIONS)
     run_dir = target / "runs" / "00-analyze"
     render.say(f"{render.DIM}analyzing the repository with {spec.name} (read-only)...{render.RESET}")

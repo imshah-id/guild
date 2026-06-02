@@ -236,6 +236,81 @@ class RoleResolutionTests(GuildTestBase):
         self.assertEqual(roles.cross_review_conflict(), "codex")
 
 
+class SmartRoutingTests(GuildTestBase):
+    """Availability- and scorecard-aware role resolution."""
+
+    def _installed(self, *names: str):
+        """Return a patch context where exactly `names` are treated as on PATH."""
+        present = set(names)
+        return mock.patch.object(roles, "_on_path", lambda name: name in present)
+
+    def test_respects_installed_configured_agent(self) -> None:
+        # codex is configured for implementer and installed: it wins, no substitution, even if
+        # the scorecard would prefer someone else.
+        with self._installed("codex", "claude", "agy"):
+            assignment = roles.resolve_role("implementer")
+        self.assertEqual(assignment.spec.name, "codex")
+        self.assertIsNone(assignment.fallback_from)
+        self.assertFalse(assignment.substituted)
+
+    def test_falls_back_to_installed_alternative(self) -> None:
+        # codex (configured implementer) is missing but other agents are installed.
+        with self._installed("claude", "agy"):
+            assignment = roles.resolve_role("implementer")
+        self.assertIn(assignment.spec.name, {"claude", "agy"})
+        self.assertEqual(assignment.fallback_from, "codex")
+        self.assertTrue(assignment.substituted)
+
+    def test_scorecard_breaks_the_choice_between_alternatives(self) -> None:
+        data = {"agents": {
+            "claude": {"total": 4, "ok": 1, "phases": {"implement": {"total": 4, "ok": 1}}},
+            "agy": {"total": 4, "ok": 4, "phases": {"implement": {"total": 4, "ok": 4}}},
+        }}
+        with mock.patch.object(scorecard, "load", lambda: data):
+            with self._installed("claude", "agy"):
+                assignment = roles.resolve_role("implementer")
+        self.assertEqual(assignment.spec.name, "agy")  # better implement track record wins
+
+    def test_keeps_configured_agent_when_nothing_installed(self) -> None:
+        # Status quo so a run without installed CLIs still resolves (and fails later, as before).
+        with self._installed():  # nothing on PATH
+            assignment = roles.resolve_role("implementer")
+        self.assertEqual(assignment.spec.name, "codex")
+        self.assertIsNone(assignment.fallback_from)
+
+    def test_reviewer_assignment_excludes_the_author(self) -> None:
+        # claude is the configured reviewer; if claude also authored, route to a different agent.
+        with self._installed("claude", "codex", "agy"):
+            assignment = roles.reviewer_assignment("claude")
+        self.assertNotEqual(assignment.spec.name, "claude")
+        self.assertEqual(assignment.fallback_from, "claude")
+
+    def test_availability_issues_flags_unavailable_required_role(self) -> None:
+        with self._installed():  # nothing installed
+            issues = roles.availability_issues()
+        self.assertTrue(issues)
+        self.assertTrue(any("implementer" in issue for issue in issues))
+
+    def test_availability_issues_empty_when_all_present(self) -> None:
+        with self._installed("claude", "codex", "agy"):
+            self.assertEqual(roles.availability_issues(), [])
+
+    def test_run_preflight_aborts_when_no_agent_installed(self) -> None:
+        guild_dir = pathlib.Path(self._tmp) / ".guild"
+        guild_dir.mkdir(parents=True, exist_ok=True)
+        config.GUILD_DIR = guild_dir
+        args = argparse.Namespace(
+            goal="do a thing", gating=None, profile=None, plan_only=False, no_compact=False,
+            model=None, effort=None, planner=None, researcher=None, implementer=None,
+            reviewer=None, tester=None,
+        )
+        with self._installed():  # nothing on PATH
+            with mock.patch.object(planner, "make_plan") as planned:
+                rc = run_cmd.cmd_run(args)
+        self.assertEqual(rc, 1)
+        planned.assert_not_called()  # failed fast, before planning
+
+
 # --- agent command construction (no execution) -------------------------------------------
 
 class AgentCmdTests(unittest.TestCase):

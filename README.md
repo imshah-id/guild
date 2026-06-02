@@ -117,6 +117,16 @@ Roles are abstract; which CLI plays each is just configuration, so you can swap 
 write-capable CLI still runs read-only, and a coder mapped to any CLI gets edit access within a
 safe sandbox.
 
+**Smart routing.** Assignment is availability-aware. Your configured agent for a role always wins
+when it is installed; if it is missing, guild substitutes the best installed alternative instead
+of failing mid-run, choosing by each agent's track record for that kind of work (the per-agent
+scorecard) and then roster order. A `guild run` checks up front and stops with a clear message —
+pointing at `guild doctor` — if a required role has no installed agent at all, rather than dying
+with a confusing error halfway through. Substitutions are reported inline as the run proceeds, and
+`guild doctor` prints a routing section showing the agent that will actually run each role. The
+cross-review rule rides on the same logic: a review is always routed to a different (preferably
+installed) agent than the author.
+
 ## Configure and toggle
 
 Settings resolve in layers, highest wins:

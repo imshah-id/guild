@@ -29,8 +29,12 @@ def _make(name: str):
         if args.paths:
             task = f"{task}\n\nPaths to focus on: {' '.join(args.paths)}"
         run_dir = config.RUNS_DIR / f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{name}"
-        spec = roles.spec_for(role)
-        render.say(f"{render.BOLD}{name}{render.RESET} -> {spec.name}  {render.DIM}({run_dir}){render.RESET}")
+        assignment = roles.resolve_role(role)
+        spec = assignment.spec
+        target = spec.name
+        if assignment.fallback_from:
+            target = f"{spec.name}  {render.DIM}(routed from {assignment.fallback_from}: {assignment.reason}){render.RESET}"
+        render.say(f"{render.BOLD}{name}{render.RESET} -> {target}  {render.DIM}({run_dir}){render.RESET}")
         with render.Spinner(f"{name} running"):
             result = agents.run_role(role, task, run_dir, timeout=config.STEP_TIMEOUT_SECONDS)
         render.say(render.rule())
