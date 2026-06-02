@@ -418,6 +418,7 @@ class HomeInterfaceTests(GuildTestBase):
         self.assertEqual(home._normalize_command("/profiles"), ["config", "profiles"])
         self.assertEqual(home._normalize_command("/report --open"), ["report", "--open"])
         self.assertEqual(home._normalize_command("/agents"), ["agents-view"])
+        self.assertEqual(home._normalize_command("/quite"), ["quit"])
 
     def test_home_embedded_command_blocks_interactive_flows(self) -> None:
         lines, rc = home.run_embedded_command('run "ship it"')
@@ -449,6 +450,19 @@ class HomeInterfaceTests(GuildTestBase):
         ui = home.HomeState(command="/quit")
         home._execute_typed(ui)
         self.assertTrue(ui.quit_requested)
+
+        ui = home.HomeState(command="/quite")
+        home._execute_typed(ui)
+        self.assertTrue(ui.quit_requested)
+
+    def test_home_single_q_key_is_input_not_quit(self) -> None:
+        ui = home.HomeState()
+
+        should_stop = home._handle_key(ui, ord("q"))
+
+        self.assertFalse(should_stop)
+        self.assertFalse(ui.quit_requested)
+        self.assertEqual(ui.command, "q")
 
     def test_home_embedded_command_runs_safe_command(self) -> None:
         lines, rc = home.run_embedded_command("config profiles")

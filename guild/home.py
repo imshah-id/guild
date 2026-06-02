@@ -59,6 +59,7 @@ _SLASH_COMMANDS: dict[str, list[str]] = {
     "/help": ["help"],
     "/clear": ["clear"],
     "/quit": ["quit"],
+    "/quite": ["quit"],
     "/exit": ["quit"],
 }
 
@@ -386,22 +387,25 @@ def _loop(stdscr: "curses.window") -> None:
         if ui.quit_requested:
             break
         ch = stdscr.getch()
-        if ch in (ord("q"), ord("Q")) and not ui.command:
+        if _handle_key(ui, ch):
             break
-        if ch in (ord("r"), ord("R"), -1) and not ui.command:
-            continue
-        if ch in (10, 13):
-            _execute_typed(ui)
-            continue
-        if ch in (9,):
-            _complete_command(ui)
-            continue
-        if ch in (curses.KEY_BACKSPACE, 127, 8):
-            ui.command = ui.command[:-1]
-            continue
-        if 32 <= ch <= 126:
-            ui.command += chr(ch)
-            continue
+
+
+def _handle_key(ui: HomeState, ch: int) -> bool:
+    if ch in (ord("r"), ord("R"), -1) and not ui.command:
+        return False
+    if ch in (10, 13):
+        _execute_typed(ui)
+        return ui.quit_requested
+    if ch in (9,):
+        _complete_command(ui)
+        return False
+    if ch in (curses.KEY_BACKSPACE, 127, 8):
+        ui.command = ui.command[:-1]
+        return False
+    if 32 <= ch <= 126:
+        ui.command += chr(ch)
+    return ui.quit_requested
 
 
 def _draw(stdscr: "curses.window", use_color: bool, ui: HomeState) -> None:
@@ -528,7 +532,7 @@ def run_embedded_command(command: str) -> tuple[list[str], int]:
         return ["Press q to quit the home interface."], 0
     if parts[0] == "help":
         return [
-            "Slash commands: /status, /sessions, /timeline, /agents, /report --open, /profiles, /doctor, /scorecard, /clear, /quit",
+            "Slash commands: /status, /sessions, /timeline, /agents, /report --open, /profiles, /doctor, /scorecard, /clear, /quit or /quite",
             "You can also type normal guild commands without the leading `guild`.",
             "Interactive flows like run/resume/monitor should be launched outside this screen.",
         ], 0
