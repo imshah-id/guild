@@ -1,6 +1,7 @@
 """`guild config`: read and toggle settings without hand-editing JSON.
 
   guild config list                 show the merged config and where each value came from
+  guild config profiles             list named run profiles
   guild config get roles.reviewer   print one resolved value
   guild config set roles.reviewer codex      [--global]
   guild config set agents.codex.model gpt-5.5
@@ -48,6 +49,15 @@ def cmd_config(args: argparse.Namespace) -> int:
             render.out(f"  {dotted:32} = {json.dumps(value):20} {render.DIM}[{source}]{render.RESET}")
         return 0
 
+    if action == "profiles":
+        profiles = config.setting("profiles", {}) or {}
+        if not profiles:
+            render.out("no profiles configured")
+            return 0
+        for name in sorted(profiles):
+            render.out(f"  {name}")
+        return 0
+
     if action == "get":
         if not args.key:
             render.say("usage: guild config get <key>")
@@ -84,7 +94,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         render.say(f"{render.YELLOW}{args.key} was not set in {target}{render.RESET}")
         return 1
 
-    render.say("usage: guild config <list|get|set|unset> ...")
+    render.say("usage: guild config <list|profiles|get|set|unset> ...")
     return 1
 
 
@@ -93,7 +103,7 @@ _MISSING = object()
 
 def register(subparsers) -> None:
     parser = subparsers.add_parser("config", help="read and toggle settings (roles, models, gating, ...)")
-    parser.add_argument("action", choices=["list", "get", "set", "unset"])
+    parser.add_argument("action", choices=["list", "profiles", "get", "set", "unset"])
     parser.add_argument("key", nargs="?")
     parser.add_argument("value", nargs="?")
     parser.add_argument("--global", dest="use_global", action="store_true",

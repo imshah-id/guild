@@ -10,12 +10,13 @@ CLIs with safe sandboxes and the permission posture each role's capability allow
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import time
 from pathlib import Path
 from typing import Callable
 
-from . import agents, compaction, config, render, roles, state
+from . import agents, compaction, config, gitutil, render, roles, scorecard, state
 from .state import (
     BLOCKED, DONE, FAILED, FIX, IMPLEMENT, NEEDS_APPROVAL, RESEARCH, REVIEW,
     RUNNING, SKIPPED, TEST, Session, Step,
@@ -62,10 +63,12 @@ class Pipeline:
     def _begin(self, step: Step, agent: str) -> None:
         step.status = RUNNING
         step.agent = agent
+        step.run_dir = str(self._rundir(step))
         step.started = time.time()
         self._save()
 
-    def _finish(self, step: Step, result: agents.AgentResult, *, verdict: str = "") -> None:
+    def _finish(self, step: Step, result: agents.AgentResult, *, verdict: str = "",
+                capture_diff: bool = False) -> None:
         step.status = DONE if result.ok else FAILED
         step.summary = (
             compaction.report(result.text, config.COMPACT_SUMMARY_CHARS)
@@ -75,7 +78,10 @@ class Pipeline:
         step.run_dir = result.run_dir
         step.verdict = verdict
         step.ended = time.time()
+        if capture_diff:
+            step.changed_files, step.diff_stat = gitutil.workspace_diff()
         self._save()
+        scorecard.record_step(step)
         self._print_done(step)
 
     def _print_done(self, step: Step) -> None:
@@ -153,7 +159,12 @@ class Pipeline:
                 return  # aborted
 
             if step.phase == RESEARCH:
-                self._do_research(step)
+                group = self._research_group_at(index)
+                if group:
+                    self._do_research_group(group)
+                    index += len(group) - 1
+                else:
+                    self._do_research(step)
             elif step.phase in (IMPLEMENT, FIX):
                 result_ok = self._do_implement(step)
                 if result_ok:
@@ -215,6 +226,53 @@ class Pipeline:
         if result.ok:
             self.notes.append(f"[{step.title}] {_first_paragraph(result.text, config.RESEARCH_NOTE_CHARS)}")
 
+    def _research_group_at(self, index: int) -> list[Step]:
+        first = self.s.steps[index]
+        if not first.parallel_group or first.needs_human:
+            return []
+        group: list[Step] = []
+        for step in self.s.steps[index:]:
+            if (
+                step.phase != RESEARCH
+                or step.parallel_group != first.parallel_group
+                or step.status in (DONE, SKIPPED)
+                or step.needs_human
+            ):
+                break
+            group.append(step)
+        return group if len(group) > 1 else []
+
+    def _do_research_group(self, steps: list[Step]) -> None:
+        spec = roles.spec_for("researcher")
+        for step in steps:
+            self._begin(step, spec.name)
+
+        def run_one(step: Step) -> agents.AgentResult:
+            try:
+                return agents.run(
+                    spec, roles.capability_for("researcher"),
+                    agents.assemble(roles.brief_for("researcher"), self._task_with_notes(step)),
+                    self._rundir(step),
+                    timeout=config.RESEARCH_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:  # defensive: keep the pipeline state coherent.
+                return agents.AgentResult(False, f"research failed: {exc}", 1, str(self._rundir(step)), 0.0)
+
+        label = f"{spec.name} researching {len(steps)} steps in parallel: {steps[0].parallel_group}"
+        results: dict[str, agents.AgentResult] = {}
+        with render.Spinner(label):
+            with ThreadPoolExecutor(max_workers=len(steps)) as pool:
+                futures = {pool.submit(run_one, step): step for step in steps}
+                for future in as_completed(futures):
+                    step = futures[future]
+                    results[step.id] = future.result()
+
+        for step in steps:
+            result = results[step.id]
+            self._finish(step, result)
+            if result.ok:
+                self.notes.append(f"[{step.title}] {_first_paragraph(result.text, config.RESEARCH_NOTE_CHARS)}")
+
     def _do_implement(self, step: Step) -> bool:
         spec = roles.spec_for("implementer")
         self._begin(step, spec.name)
@@ -225,7 +283,7 @@ class Pipeline:
                 self._rundir(step),
                 timeout=config.STEP_TIMEOUT_SECONDS,
             )
-        self._finish(step, result)
+        self._finish(step, result, capture_diff=True)
         return result.ok
 
     def _review(self, impl_step: Step, index: int) -> None:

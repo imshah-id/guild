@@ -12,17 +12,23 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import argparse
 from unittest import mock
 
 # Make `import guild` work when this file is run directly.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from guild import (  # noqa: E402
-    agents, compaction, config, context, pipeline, planner, prompts, roles, state,
+    agents, compaction, config, context, monitor, pipeline, planner, prompts, roles,
+    scorecard, state,
 )
+from guild.commands import completion as completion_cmd  # noqa: E402
 from guild.commands import init as init_cmd  # noqa: E402
+from guild.commands import plan as plan_cmd  # noqa: E402
+from guild.commands import recovery as recovery_cmd  # noqa: E402
 from guild.commands import report as report_cmd  # noqa: E402
 from guild.commands import resume as resume_cmd  # noqa: E402
+from guild.commands import run as run_cmd  # noqa: E402
 from guild.commands import sessions as sessions_cmd  # noqa: E402
 from guild.commands import status as status_cmd  # noqa: E402
 from guild.roles import READ_ONLY, WRITE, AgentSpec  # noqa: E402
@@ -52,6 +58,8 @@ class GuildTestBase(unittest.TestCase):
         }
         config.SETTINGS = copy.deepcopy(config.DEFAULTS)
         config.SOURCES = {}
+        config._refresh_constants()
+        config.PROJECT_ROOT = pathlib.Path(self._tmp)
         config.RUNS_DIR = pathlib.Path(self._tmp) / "runs"
         config.CONTEXT_PATH = None
         config.GUILD_DIR = None
@@ -62,6 +70,7 @@ class GuildTestBase(unittest.TestCase):
 
         config.SETTINGS = self._saved["SETTINGS"]
         config.SOURCES = self._saved["SOURCES"]
+        config._refresh_constants()
         config.RUNS_DIR = self._saved["RUNS_DIR"]
         config.CONTEXT_PATH = self._saved["CONTEXT_PATH"]
         config.GUILD_DIR = self._saved["GUILD_DIR"]
@@ -178,6 +187,13 @@ class ConfigSetGetTests(GuildTestBase):
         self.assertEqual(config.parse_value("3"), 3)
         self.assertEqual(config.parse_value("codex"), "codex")
 
+    def test_apply_profile_layers_runtime_settings(self) -> None:
+        self.assertIsNone(config.apply_profile("fast"))
+        self.assertEqual(config.setting("gating"), "hands-off")
+        self.assertEqual(config.MAX_FIX_ATTEMPTS, 1)
+        self.assertEqual(config.setting("agents.codex.effort"), "low")
+        self.assertIn("unknown profile", config.apply_profile("missing") or "")
+
 
 # --- roles + cross-review ----------------------------------------------------------------
 
@@ -264,6 +280,28 @@ class InitScaffoldTests(GuildTestBase):
         text = init_cmd._context_template("strict-ts")
         self.assertIn("no `any`", text)
         self.assertIn("## Build, run, test", text)
+
+
+class PlannerTests(GuildTestBase):
+    def test_make_plan_reads_parallel_group(self) -> None:
+        session = state.Session.new("research two things", "guided")
+        body = json.dumps({
+            "steps": [
+                {
+                    "phase": "research",
+                    "title": "a",
+                    "task": "look at a",
+                    "needs_human": False,
+                    "human_reason": "",
+                    "parallel_group": "scout",
+                }
+            ]
+        })
+
+        with mock.patch.object(agents, "run", lambda *a, **k: _fake_result(str(session.dir / "00-plan"), body)):
+            steps = planner.make_plan(session)
+
+        self.assertEqual(steps[0].parallel_group, "scout")
 
 
 # --- status smoke ------------------------------------------------------------------------
@@ -360,7 +398,8 @@ class SessionCommandTests(GuildTestBase):
         session.status = "done"
         session.steps = [
             state.Step(id="01-implement", phase="implement", title="build",
-                       status=state.DONE, agent="codex", summary="changed app.py"),
+                       status=state.DONE, agent="codex", summary="changed app.py",
+                       changed_files=["app.py"], diff_stat=" app.py | 2 ++"),
             state.Step(id="01-implement-review", phase="review", title="review: build",
                        status=state.DONE, agent="claude", verdict="APPROVE"),
         ]
@@ -370,6 +409,8 @@ class SessionCommandTests(GuildTestBase):
         self.assertIn("- Goal: ship it", text)
         self.assertIn("### 1. build", text)
         self.assertIn("changed app.py", text)
+        self.assertIn("`app.py`", text)
+        self.assertIn("app.py | 2 ++", text)
         self.assertIn("- Verdict: APPROVE", text)
 
     def test_resume_lines_show_next_and_interrupted_step(self) -> None:
@@ -384,6 +425,95 @@ class SessionCommandTests(GuildTestBase):
         self.assertIn("interrupted:", text)
         self.assertIn("next:", text)
         self.assertIn("halfway", text)
+
+    def test_plan_edits_drop_move_and_set(self) -> None:
+        session = state.Session.new("edit me", "guided")
+        session.steps = [
+            state.Step(id="01-research", phase=state.RESEARCH, title="first"),
+            state.Step(id="02-test", phase=state.TEST, title="second"),
+        ]
+        args = argparse.Namespace(
+            drop=[],
+            move=[["2", "1"]],
+            set=[["02-test", "title=renamed"], ["02-test", "parallel_group=batch"]],
+        )
+
+        error = plan_cmd._apply_edits(session, args)
+
+        self.assertIsNone(error)
+        self.assertEqual([s.id for s in session.steps], ["02-test", "01-research"])
+        self.assertEqual(session.steps[0].title, "renamed")
+        self.assertEqual(session.steps[0].parallel_group, "batch")
+
+    def test_retry_resets_step_and_removes_generated_followups(self) -> None:
+        session = state.Session.new("retry me", "guided")
+        session.steps = [
+            state.Step(id="01-implement", phase=state.IMPLEMENT, title="build",
+                       status=state.DONE, agent="codex", summary="old"),
+            state.Step(id="01-implement-review", phase=state.REVIEW, title="review",
+                       status=state.DONE, verdict="REQUEST-CHANGES"),
+            state.Step(id="01-implement-fix1", phase=state.FIX, title="fix",
+                       status=state.DONE),
+        ]
+        session.save()
+
+        rc = recovery_cmd.cmd_retry(argparse.Namespace(
+            session=session.id, step="1", run=False, no_compact=False,
+        ))
+        loaded = state.Session.load(session.id)
+        assert loaded is not None
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(loaded.steps), 1)
+        self.assertEqual(loaded.steps[0].status, state.PENDING)
+        self.assertEqual(loaded.steps[0].summary, "")
+
+    def test_skip_marks_step_skipped(self) -> None:
+        session = state.Session.new("skip me", "guided")
+        session.steps = [state.Step(id="01-test", phase=state.TEST, title="tests")]
+        session.save()
+
+        rc = recovery_cmd.cmd_skip(argparse.Namespace(
+            session=session.id, step="01-test", run=False, no_compact=False,
+        ))
+        loaded = state.Session.load(session.id)
+        assert loaded is not None
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(loaded.steps[0].status, state.SKIPPED)
+
+    def test_monitor_plain_and_json_snapshots(self) -> None:
+        data = {"id": "s1", "status": "running", "goal": "g", "steps": [
+            {"status": "done", "phase": "test", "title": "verify", "started": 0.0}
+        ]}
+
+        self.assertIn("session s1", "\n".join(monitor.snapshot_lines(data)))
+        self.assertEqual(json.loads(monitor.snapshot_json(data))["id"], "s1")
+
+    def test_scorecard_records_agent_outcomes(self) -> None:
+        config.GUILD_DIR = pathlib.Path(self._tmp) / ".guild"
+        step = state.Step(id="01-review", phase=state.REVIEW, title="review",
+                          status=state.DONE, agent="claude", verdict="APPROVE")
+
+        scorecard.record_step(step)
+        data = scorecard.load()
+
+        self.assertEqual(data["agents"]["claude"]["ok"], 1)
+        self.assertIn("APPROVE=1", "\n".join(scorecard.lines(data)))
+
+    def test_completion_scripts_include_commands(self) -> None:
+        self.assertIn("guild", completion_cmd._bash())
+        self.assertIn("resume", completion_cmd._fish())
+
+    def test_run_profile_override_applies_before_flags(self) -> None:
+        args = argparse.Namespace(profile="fast", model=None, effort="high")
+        for role in roles.ROLES:
+            setattr(args, role, None)
+
+        self.assertIsNone(run_cmd._apply_overrides(args))
+
+        self.assertEqual(config.setting("gating"), "hands-off")
+        self.assertEqual(config.setting("agents.codex.effort"), "high")
 
 
 # --- pipeline engine (mocked agents) -----------------------------------------------------
@@ -495,6 +625,27 @@ class PipelineEngineTests(GuildTestBase):
         review = next(s for s in session.steps if s.phase == "review")
         self.assertEqual(review.status, state.DONE)
         self.assertEqual(review.verdict, "APPROVE")
+
+    def test_parallel_research_group_runs_all_grouped_steps(self) -> None:
+        session = state.Session.new("research", "hands-off")
+        session.steps = [
+            state.Step(id="01-research", phase=state.RESEARCH, title="a",
+                       task="look a", parallel_group="scout"),
+            state.Step(id="02-research", phase=state.RESEARCH, title="b",
+                       task="look b", parallel_group="scout"),
+        ]
+        prompts_seen: list[str] = []
+
+        def fake_run(spec, capability, prompt, run_dir, *, timeout):
+            prompts_seen.append(prompt)
+            return _fake_result(str(run_dir), f"notes from {run_dir.name}")
+
+        with mock.patch.object(agents, "run", fake_run):
+            pipeline.Pipeline(session, lambda p, o: o[0]).run()
+
+        self.assertEqual(session.status, "done")
+        self.assertEqual(len(prompts_seen), 2)
+        self.assertTrue(all(s.status == state.DONE for s in session.steps))
 
 
 if __name__ == "__main__":

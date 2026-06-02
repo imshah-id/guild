@@ -57,6 +57,11 @@ def markdown_report(session: state.Session) -> str:
             lines.append(f"- Verdict: {step.verdict}")
         if step.run_dir:
             lines.append(f"- Run dir: `{step.run_dir}`")
+        if step.changed_files:
+            lines.extend(["", "Changed files visible after this step:"])
+            lines.extend(f"- `{path}`" for path in step.changed_files)
+        if step.diff_stat:
+            lines.extend(["", "```text", step.diff_stat, "```"])
         if step.summary:
             lines.extend(["", _clean(step.summary)])
         lines.append("")

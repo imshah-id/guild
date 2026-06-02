@@ -5,6 +5,7 @@ It only reads state.json and tails the active step's log, so it can never distur
 from __future__ import annotations
 
 import curses
+import json
 import sys
 import time
 from pathlib import Path
@@ -47,19 +48,26 @@ def _tail(path: Path, lines: int) -> list[str]:
 
 def watch(state_path: Path) -> None:
     if not sys.stdout.isatty():
-        _snapshot(state.load_dict(state_path))
+        print("\n".join(snapshot_lines(state.load_dict(state_path))))
         return
     curses.wrapper(_loop, state_path)
 
 
-def _snapshot(data: dict | None) -> None:
+def snapshot_lines(data: dict | None) -> list[str]:
     if not data:
-        print("no session data")
-        return
-    print(f"session {data.get('id')}  [{data.get('status')}]  goal: {data.get('goal')}")
+        return ["no session data"]
+    lines = [f"session {data.get('id')}  [{data.get('status')}]  goal: {data.get('goal')}"]
     for step in data.get("steps", []):
         icon = _STATUS_ICON.get(step.get("status", "pending"), "  ")
-        print(f"  [{icon}] {step.get('phase',''):9} {step.get('title','')}  {_elapsed(step)}s {step.get('verdict','')}")
+        lines.append(
+            f"  [{icon}] {step.get('phase',''):9} {step.get('title','')}  "
+            f"{_elapsed(step)}s {step.get('verdict','')}"
+        )
+    return lines
+
+
+def snapshot_json(data: dict | None) -> str:
+    return json.dumps(data or {}, indent=2)
 
 
 def _loop(stdscr: "curses.window", state_path: Path) -> None:

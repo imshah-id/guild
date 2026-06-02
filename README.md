@@ -35,10 +35,12 @@ guild init                # writes .guild/ (context.md + config.json) into this 
 $EDITOR .guild/context.md # tell the team what the project is and its rules
 guild status              # see the resolved setup at a glance
 guild run "Add the XP ledger reducer, pure TS, with tests" --plan-only   # preview the plan
+guild plan                # inspect or edit that saved plan
 guild run "Add the XP ledger reducer, pure TS, with tests"               # let it build
 guild sessions            # list previous runs
 guild report              # print a Markdown report for the latest run
 guild monitor             # live dashboard, in a second pane
+guild monitor --plain     # one-shot text snapshot
 guild resume              # a run stopped early? pick up where it left off
 ```
 
@@ -46,6 +48,10 @@ A run that stops short — a timeout, Ctrl-C, a sleeping laptop, or an abort at 
 progress in `state.json`. `guild resume` (or `guild resume <id>` for a specific session) reloads
 it and re-enters the pipeline, skipping the steps that already finished; a step caught mid-flight
 re-runs from scratch, and anything you already approved isn't re-asked.
+
+For targeted recovery, use `guild retry <session> <step>` to reset one step by index or id, or
+`guild skip <session> <step>` to mark one step skipped. Add `--run` to either command to resume
+immediately.
 
 ## The team
 
@@ -85,6 +91,16 @@ Or override just for one run:
 
 ```sh
 guild run "..." --reviewer agy --model codex=gpt-5.5 --effort high --gating checkpoint
+guild run "..." --profile fast       # profiles: fast, careful, review-heavy
+guild config profiles                # list available profiles
+```
+
+Generate completions with:
+
+```sh
+guild completion zsh
+guild completion bash
+guild completion fish
 ```
 
 ## Gating (where it stops for you)
@@ -109,7 +125,7 @@ guild run "..." --reviewer agy --model codex=gpt-5.5 --effort high --gating chec
 ```
 guild/
   cli.py            arg parsing + dispatch
-  commands/         run, sessions, report, status, monitor, config, init, doctor, single
+  commands/         run, plan, retry/skip, sessions, report, status, monitor, config, init, doctor
   config.py         layered config + project discovery
   roles.py          abstract roles, role->agent resolution, cross-review rule
   agents.py         agent adapters (claude/codex/agy), capability-aware, testable cmd builders
@@ -117,7 +133,9 @@ guild/
   planner.py        the planner decomposes a goal into a JSON plan
   pipeline.py       the engine: execute, auto cross-review, fix loop, gates
   state.py          session/step model, atomic state.json
-  monitor.py        live curses dashboard (read-only)
+  monitor.py        live curses dashboard and plain/json snapshots (read-only)
+  scorecard.py      lightweight per-agent outcome stats
+  gitutil.py        read-only git status/diff reporting
   compaction.py     token-saving compaction of context fed between agents
   prompts.py        built-in role briefs, planner instructions, init templates
   tests/            stdlib unittest (no network, no real agent calls)
@@ -133,10 +151,11 @@ on disk in each step's `result.md`. Disable with `--no-compact`; tune the limits
 
 ## Safety
 
-guild never runs git, database, or destructive commands itself; it only invokes the agent CLIs
-with safe sandboxes and never passes a bypass flag. The reviewer is always a different agent than
-the author. Fix loops are bounded. Database, dependency, and destructive steps stop for your
-approval in every mode. Nothing is committed or merged automatically: that stays with you.
+guild never mutates git, touches the database, or runs destructive commands itself; it only invokes
+the agent CLIs with safe sandboxes and never passes a bypass flag. It does run read-only git status
+and diff commands for reporting. The reviewer is always a different agent than the author. Fix
+loops are bounded. Database, dependency, and destructive steps stop for your approval in every
+mode. Nothing is committed or merged automatically: that stays with you.
 
 ## Develop
 

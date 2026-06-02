@@ -244,6 +244,7 @@ def apply_profile(name: str) -> str | None:
     merged = _deep_merge(SETTINGS, profile, f"profile:{name}", sources)
     SETTINGS.clear()
     SETTINGS.update(merged)
+    SOURCES.update(sources)
     _refresh_constants()
     return None
 

@@ -30,6 +30,12 @@ def _apply_overrides(args: argparse.Namespace) -> str | None:
     overrides: dict = {}
     known = set(roles.agent_names())
 
+    if args.profile:
+        error = config.apply_profile(args.profile)
+        if error:
+            return error
+        known = set(roles.agent_names())
+
     for role in roles.ROLES:
         chosen = getattr(args, role, None)
         if chosen:
@@ -103,6 +109,7 @@ def register(subparsers) -> None:
     parser.add_argument("goal")
     parser.add_argument("--gating", choices=config.GATING_MODES, default=None,
                         help="where to pause for you (default: the project's configured gating)")
+    parser.add_argument("--profile", help="named config profile to apply for this run")
     parser.add_argument("--plan-only", action="store_true",
                         help="produce and print the plan, then stop before any building")
     parser.add_argument("--no-compact", action="store_true",
