@@ -366,7 +366,7 @@ class HomeInterfaceTests(GuildTestBase):
 
         text = "\n".join(home.home_lines())
 
-        self.assertIn("API / CLI", text)
+        self.assertIn("API / CLI agents", text)
         self.assertIn("selected models", text)
         self.assertIn("effort", text)
         self.assertIn("usage", text)
@@ -383,19 +383,46 @@ class HomeInterfaceTests(GuildTestBase):
     def test_home_dashboard_has_command_input(self) -> None:
         text = "\n".join(home.dashboard_lines(90, home.HomeState(command="status")))
 
-        self.assertIn("Command Input", text)
+        self.assertIn("Output", text)
         self.assertIn("> status", text)
-        self.assertIn("Command Output", text)
+        self.assertIn("Enter run", text)
 
     def test_home_embedded_command_normalizes_guild_prefix(self) -> None:
         self.assertEqual(home._normalize_command("guild status"), ["status"])
         self.assertEqual(home._normalize_command("?"), ["help"])
+        self.assertEqual(home._normalize_command("/profiles"), ["config", "profiles"])
+        self.assertEqual(home._normalize_command("/report --open"), ["report", "--open"])
 
     def test_home_embedded_command_blocks_interactive_flows(self) -> None:
         lines, rc = home.run_embedded_command('run "ship it"')
 
         self.assertEqual(rc, 1)
         self.assertIn("needs its own terminal flow", "\n".join(lines))
+
+    def test_home_slash_help_and_unknown_command(self) -> None:
+        lines, rc = home.run_embedded_command("/help")
+        self.assertEqual(rc, 0)
+        self.assertIn("/status", "\n".join(lines))
+
+        lines, rc = home.run_embedded_command("/wat")
+        self.assertEqual(rc, 1)
+        self.assertIn("Unknown slash command", "\n".join(lines))
+
+    def test_home_tab_completion_handles_slash_commands(self) -> None:
+        ui = home.HomeState(command="/sta")
+        home._complete_command(ui)
+
+        self.assertEqual(ui.command, "/status ")
+
+    def test_home_execute_clear_and_quit_actions(self) -> None:
+        ui = home.HomeState(command="/clear", transcript=["old output"])
+        home._execute_typed(ui)
+        self.assertEqual(ui.transcript, [])
+        self.assertEqual(ui.message, "Output cleared.")
+
+        ui = home.HomeState(command="/quit")
+        home._execute_typed(ui)
+        self.assertTrue(ui.quit_requested)
 
     def test_home_embedded_command_runs_safe_command(self) -> None:
         lines, rc = home.run_embedded_command("config profiles")
