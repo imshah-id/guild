@@ -380,6 +380,29 @@ class HomeInterfaceTests(GuildTestBase):
         self.assertEqual(rc, 0)
         opened.assert_called_once()
 
+    def test_home_dashboard_has_command_input(self) -> None:
+        text = "\n".join(home.dashboard_lines(90, home.HomeState(command="status")))
+
+        self.assertIn("Command Input", text)
+        self.assertIn("> status", text)
+        self.assertIn("Command Output", text)
+
+    def test_home_embedded_command_normalizes_guild_prefix(self) -> None:
+        self.assertEqual(home._normalize_command("guild status"), ["status"])
+        self.assertEqual(home._normalize_command("?"), ["help"])
+
+    def test_home_embedded_command_blocks_interactive_flows(self) -> None:
+        lines, rc = home.run_embedded_command('run "ship it"')
+
+        self.assertEqual(rc, 1)
+        self.assertIn("needs its own terminal flow", "\n".join(lines))
+
+    def test_home_embedded_command_runs_safe_command(self) -> None:
+        lines, rc = home.run_embedded_command("config profiles")
+
+        self.assertEqual(rc, 0)
+        self.assertIn("fast", "\n".join(lines))
+
 
 # --- state round trip --------------------------------------------------------------------
 

@@ -7,9 +7,12 @@ everything from argparse help.
 from __future__ import annotations
 
 import curses
+import io
 import shutil
+import shlex
 import sys
 import time
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 
 from . import __version__, config, render, roles, scorecard, state
@@ -27,6 +30,20 @@ class AgentRow:
     access: str
     status: str
     usage: str
+
+
+@dataclass
+class HomeState:
+    command: str = ""
+    transcript: list[str] | None = None
+    message: str = "Type a guild command below. Example: status, sessions, report --open"
+
+    def __post_init__(self) -> None:
+        if self.transcript is None:
+            self.transcript = []
+
+
+_EMBEDDED_BLOCKED = {"run", "resume", "monitor", "research", "implement", "test", "review"}
 
 
 def _clip(text: object, width: int) -> str:
@@ -199,16 +216,31 @@ def _latest_body(width: int) -> list[str]:
 
 def _actions_body() -> list[str]:
     return [
-        "guild run \"<goal>\"       Plan, build, review, test",
-        "guild monitor            Live dashboard for latest session",
-        "guild sessions           Browse previous runs",
-        "guild report --open      Open latest Markdown report",
-        "guild config profiles    Show model/effort presets",
-        "guild doctor --live      Check agent CLIs",
+        "Type commands in the input bar, without the leading `guild`.",
+        "status                  Show setup",
+        "sessions                Browse previous runs",
+        "report --open           Open latest Markdown report",
+        "config profiles         Show model/effort presets",
+        "doctor                  Check agent CLIs",
+        "run \"<goal>\"            Runs outside the home UI for full interactivity",
     ]
 
 
-def dashboard_lines(width: int = DEFAULT_WIDTH) -> list[str]:
+def _transcript_body(ui: HomeState) -> list[str]:
+    assert ui.transcript is not None
+    if ui.transcript:
+        return ui.transcript[-6:]
+    return [ui.message]
+
+
+def _input_body(ui: HomeState, width: int) -> list[str]:
+    inner = width - 4
+    prompt = "> "
+    return [prompt + _clip(ui.command, max(inner - len(prompt), 1))]
+
+
+def dashboard_lines(width: int = DEFAULT_WIDTH, ui: HomeState | None = None) -> list[str]:
+    ui = ui or HomeState()
     width = max(width, 72)
     header_inner = width - 4
     title = f"guild {__version__}"
@@ -222,7 +254,9 @@ def dashboard_lines(width: int = DEFAULT_WIDTH) -> list[str]:
     lines.extend(_box("API / CLI / selected models / effort / availability / usage", _api_body(width), width))
     lines.extend(_box("Latest Session", _latest_body(width), width))
     lines.extend(_box("Quick Actions", _actions_body(), width))
-    lines.append("Keys: q quit, r refresh")
+    lines.extend(_box("Command Output", _transcript_body(ui), width))
+    lines.extend(_box("Command Input", _input_body(ui, width), width))
+    lines.append("Keys: enter run, tab completes first word, backspace edit, q quit, r refresh")
     return lines
 
 
@@ -250,20 +284,34 @@ def _loop(stdscr: "curses.window") -> None:
         curses.init_pair(3, curses.COLOR_YELLOW, -1)
         curses.init_pair(4, curses.COLOR_RED, -1)
 
+    ui = HomeState()
+
     while True:
-        _draw(stdscr, use_color)
+        _draw(stdscr, use_color, ui)
         ch = stdscr.getch()
-        if ch in (ord("q"), ord("Q")):
+        if ch in (ord("q"), ord("Q")) and not ui.command:
             break
-        if ch in (ord("r"), ord("R"), -1):
+        if ch in (ord("r"), ord("R"), -1) and not ui.command:
+            continue
+        if ch in (10, 13):
+            _execute_typed(ui)
+            continue
+        if ch in (9,):
+            _complete_command(ui)
+            continue
+        if ch in (curses.KEY_BACKSPACE, 127, 8):
+            ui.command = ui.command[:-1]
+            continue
+        if 32 <= ch <= 126:
+            ui.command += chr(ch)
             continue
 
 
-def _draw(stdscr: "curses.window", use_color: bool) -> None:
+def _draw(stdscr: "curses.window", use_color: bool, ui: HomeState) -> None:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
     w = max(width - 1, 72)
-    lines = dashboard_lines(w)
+    lines = dashboard_lines(w, ui)
     for row, line in enumerate(lines[:max(height - 1, 0)]):
         attr = 0
         if row in (0, 1, 2) or line.startswith("+") and line.endswith("+"):
@@ -276,3 +324,80 @@ def _draw(stdscr: "curses.window", use_color: bool) -> None:
     footer = f" q quit   r refresh   {time.strftime('%H:%M:%S')}"
     stdscr.addnstr(height - 1, 0, footer.ljust(width - 1), width - 1, curses.A_REVERSE)
     stdscr.refresh()
+
+
+def _normalize_command(raw: str) -> list[str]:
+    text = raw.strip()
+    if not text:
+        return []
+    if text == "?":
+        return ["help"]
+    parts = shlex.split(text)
+    if parts and parts[0] == "guild":
+        parts = parts[1:]
+    return parts
+
+
+def _complete_command(ui: HomeState) -> None:
+    from . import cli
+
+    commands = sorted(_registered_commands(cli.build_parser()))
+    current = ui.command.strip()
+    if " " in current:
+        return
+    matches = [command for command in commands if command.startswith(current)]
+    if len(matches) == 1:
+        ui.command = matches[0] + " "
+    elif matches:
+        assert ui.transcript is not None
+        ui.transcript = [f"completions: {', '.join(matches)}"]
+
+
+def _registered_commands(parser) -> set[str]:
+    commands: set[str] = set()
+    for action in parser._actions:
+        choices = getattr(action, "choices", None)
+        if isinstance(choices, dict):
+            commands.update(choices.keys())
+    return commands
+
+
+def _execute_typed(ui: HomeState) -> None:
+    command = ui.command.strip()
+    ui.command = ""
+    lines, _ = run_embedded_command(command)
+    ui.transcript = lines
+
+
+def run_embedded_command(command: str) -> tuple[list[str], int]:
+    parts = _normalize_command(command)
+    if not parts:
+        return ["No command entered."], 0
+    if parts[0] in ("quit", "exit"):
+        return ["Press q to quit the home interface."], 0
+    if parts[0] == "help":
+        return [
+            "Try: status, sessions, report --open, config profiles, doctor",
+            "Run interactive commands like `guild run \"<goal>\"` outside this home screen.",
+        ], 0
+    if parts[0] in _EMBEDDED_BLOCKED:
+        return [
+            f"`guild {parts[0]}` needs its own terminal flow.",
+            f"Run it outside the home interface: guild {' '.join(parts)}",
+        ], 1
+
+    from . import cli
+
+    out = io.StringIO()
+    err = io.StringIO()
+    try:
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = cli.main(parts)
+    except SystemExit as exc:
+        rc = int(exc.code or 0) if isinstance(exc.code, int) else 1
+    except Exception as exc:  # Keep the home interface alive.
+        return [f"error: {exc}"], 1
+
+    text = (out.getvalue() + err.getvalue()).strip()
+    lines = text.splitlines() if text else [f"guild {' '.join(parts)} finished with no output"]
+    return lines[-8:], rc

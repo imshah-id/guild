@@ -146,10 +146,13 @@ Completion scripts include top-level commands plus common subcommand flags such 
 ## Terminal UI
 
 Run `guild` by itself to open the home interface. It is organized into structured terminal panels:
-overview, APIs/selected models/effort/availability/usage, latest session, and quick actions.
-Usage comes from the local scorecard. Foreground runs use compact banners, phase chips, status
-marks, and progress bars so plans and review/fix loops are easy to scan without adding
-dependencies. `guild monitor` keeps the live curses dashboard, while `guild monitor --plain` and
+overview, APIs/selected models/effort/availability/usage, latest session, quick actions, command
+output, and command input. Type commands directly in the input bar without the leading `guild`,
+such as `status`, `sessions`, `report --open`, or `config profiles`. Interactive flows like
+`run "<goal>"` still launch best as normal shell commands so they can own the terminal. Usage
+comes from the local scorecard. Foreground runs use compact banners, phase chips, status marks,
+and progress bars so plans and review/fix loops are easy to scan without adding dependencies.
+`guild monitor` keeps the live curses dashboard, while `guild monitor --plain` and
 `guild monitor --json` provide script-friendly snapshots.
 
 ## Project layout it creates
