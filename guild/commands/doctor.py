@@ -2,10 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
+from dataclasses import dataclass
 
 from .. import config, render, roles
+
+
+@dataclass(frozen=True)
+class ProjectCheck:
+    level: str
+    item: str
+    detail: str
 
 
 def _ping(cmd: list[str], *, last_line: bool = False) -> str:
@@ -18,6 +27,99 @@ def _ping(cmd: list[str], *, last_line: bool = False) -> str:
     if last_line and text:
         text = text.splitlines()[-1]
     return text[:40] if text else "(no output)"
+
+
+def _check_mark(level: str) -> str:
+    if level == "ok":
+        return f"{render.GREEN}ok  {render.RESET}"
+    if level == "warn":
+        return f"{render.YELLOW}warn{render.RESET}"
+    return f"{render.RED}MISS{render.RESET}"
+
+
+def project_checks() -> list[ProjectCheck]:
+    checks: list[ProjectCheck] = []
+    if config.GUILD_DIR is None:
+        return [ProjectCheck("miss", "project", "not initialized here; run `guild init`")]
+
+    guild_dir = config.GUILD_DIR
+    checks.append(ProjectCheck("ok", ".guild", str(guild_dir)))
+
+    config_path = guild_dir / "config.json"
+    if not config_path.exists():
+        checks.append(ProjectCheck("miss", "config", ".guild/config.json is missing"))
+    else:
+        try:
+            parsed = json.loads(config_path.read_text())
+            checks.append(ProjectCheck(
+                "ok" if isinstance(parsed, dict) else "miss",
+                "config",
+                ".guild/config.json is readable JSON" if isinstance(parsed, dict) else "top-level JSON must be an object",
+            ))
+        except (OSError, json.JSONDecodeError) as exc:
+            checks.append(ProjectCheck("miss", "config", f".guild/config.json is not readable JSON: {exc}"))
+
+    context_path = guild_dir / "context.md"
+    if not context_path.exists():
+        checks.append(ProjectCheck("miss", "context", ".guild/context.md is missing"))
+    else:
+        try:
+            text = context_path.read_text().strip()
+        except OSError as exc:
+            checks.append(ProjectCheck("miss", "context", f".guild/context.md is not readable: {exc}"))
+        else:
+            if not text:
+                checks.append(ProjectCheck("miss", "context", ".guild/context.md is empty"))
+            elif "<" in text and ">" in text:
+                checks.append(ProjectCheck("warn", "context", "context.md still appears to contain template placeholders"))
+            else:
+                checks.append(ProjectCheck("ok", "context", ".guild/context.md has project instructions"))
+
+    runs_dir = guild_dir / "runs"
+    if not runs_dir.is_dir():
+        checks.append(ProjectCheck("miss", "runs", ".guild/runs is missing"))
+    else:
+        checks.append(ProjectCheck("ok", "runs", ".guild/runs exists"))
+        runs_ignore = runs_dir / ".gitignore"
+        if not runs_ignore.exists():
+            checks.append(ProjectCheck("warn", "runs gitignore", ".guild/runs/.gitignore is missing"))
+        else:
+            try:
+                ignored = "*" in runs_ignore.read_text().splitlines()
+            except OSError:
+                ignored = False
+            checks.append(ProjectCheck(
+                "ok" if ignored else "warn",
+                "runs gitignore",
+                "run logs are gitignored" if ignored else ".guild/runs/.gitignore should ignore run logs",
+            ))
+
+    session_dirs = []
+    if config.RUNS_DIR.exists():
+        session_dirs = [path for path in config.RUNS_DIR.iterdir() if path.is_dir()]
+    if session_dirs:
+        newest = max(session_dirs, key=lambda path: path.stat().st_mtime)
+        latest = newest / "state.json"
+        readable = state_path_readable(latest)
+        checks.append(ProjectCheck(
+            "ok" if readable else "miss",
+            "latest state",
+            f"{latest.relative_to(config.PROJECT_ROOT)} is readable"
+            if readable
+            else f"{latest.relative_to(config.PROJECT_ROOT)} is missing or invalid",
+        ))
+    return checks
+
+
+def state_path_readable(path) -> bool:
+    from .. import state
+
+    return path.exists() and state.load_dict(path) is not None
+
+
+def project_check_lines(checks: list[ProjectCheck] | None = None) -> list[str]:
+    checks = checks if checks is not None else project_checks()
+    return [f"  {_check_mark(check.level)} {check.item:14} {check.detail}" for check in checks]
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -47,6 +149,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         render.out(f"  {render.GREEN}ok  {render.RESET} cross-review: reviewer differs from implementer")
 
+    if args.project:
+        render.out("")
+        render.out(f"{render.BOLD}project{render.RESET}")
+        checks = project_checks()
+        for line in project_check_lines(checks):
+            render.out(line)
+        if any(check.level == "miss" for check in checks):
+            ok = False
+
     if args.live and present:
         render.out("")
         render.out(f"{render.BOLD}live ping{render.RESET} {render.DIM}(one tiny prompt each, costs a call){render.RESET}")
@@ -64,4 +175,5 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def register(subparsers) -> None:
     parser = subparsers.add_parser("doctor", help="check the configured agent CLIs and config")
     parser.add_argument("--live", action="store_true", help="also ping each agent (costs a call)")
+    parser.add_argument("--project", action="store_true", help="also check .guild project files")
     parser.set_defaults(func=cmd_doctor, needs_project=False)

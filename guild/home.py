@@ -50,6 +50,7 @@ _SLASH_COMMANDS: dict[str, list[str]] = {
     "/status": ["status"],
     "/sessions": ["sessions"],
     "/report": ["report"],
+    "/timeline": ["timeline"],
     "/profiles": ["config", "profiles"],
     "/config": ["config"],
     "/doctor": ["doctor"],
@@ -216,6 +217,7 @@ def _quicklinks_lines() -> list[str]:
         "Getting started",
         "/status     inspect the resolved setup",
         "/sessions   browse previous runs",
+        "/timeline   show the latest run events",
         "/profiles   model & effort presets",
         "/report     open the latest summary",
         "/help       all slash commands",
@@ -475,7 +477,7 @@ def run_embedded_command(command: str) -> tuple[list[str], int]:
         return ["Press q to quit the home interface."], 0
     if parts[0] == "help":
         return [
-            "Slash commands: /status, /sessions, /report --open, /profiles, /doctor, /scorecard, /clear, /quit",
+            "Slash commands: /status, /sessions, /timeline, /report --open, /profiles, /doctor, /scorecard, /clear, /quit",
             "You can also type normal guild commands without the leading `guild`.",
             "Interactive flows like run/resume/monitor should be launched outside this screen.",
         ], 0

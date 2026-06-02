@@ -6,7 +6,7 @@ import argparse
 from .. import render
 
 _COMMANDS = (
-    "init status run plan sessions report resume retry skip monitor config research implement "
+    "init status run plan sessions report timeline label unlabel note resume retry skip monitor config research implement "
     "test review doctor scorecard completion"
 )
 
@@ -16,12 +16,16 @@ _OPTIONS: dict[str, str] = {
     "plan": "--drop --move --set --validate --run --no-compact",
     "sessions": "--limit -n",
     "report": "--output -o --open",
+    "timeline": "",
+    "label": "latest",
+    "unlabel": "latest",
+    "note": "latest",
     "resume": "--no-compact",
     "retry": "--run --no-compact",
     "skip": "--run --no-compact",
     "monitor": "--plain --json",
     "config": "--global list profiles get set unset",
-    "doctor": "--live",
+    "doctor": "--live --project",
     "scorecard": "--json",
     "completion": "bash zsh fish",
 }

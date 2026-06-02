@@ -6,6 +6,9 @@
   guild plan [id]                     inspect or edit a saved plan
   guild sessions                      list previous sessions
   guild report [id]                   write a Markdown summary for a session
+  guild timeline [id]                 show chronological run events
+  guild label <id> <label...>         tag a session for later
+  guild note <id> <text...>           append a note to a session
   guild resume [id]                   continue an interrupted session where it stopped
   guild retry <id> <step>             reset one step so resume re-runs it
   guild skip <id> <step>              mark one step skipped
@@ -21,7 +24,7 @@ import argparse
 from . import __version__, config, home
 from .commands import (
     completion, config_cmd, doctor, init, monitor, plan, recovery, report, resume, run,
-    scorecard_cmd, sessions, single, status,
+    scorecard_cmd, session_meta, sessions, single, status, timeline,
 )
 
 
@@ -42,6 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan.register(sub)
     sessions.register(sub)
     report.register(sub)
+    timeline.register(sub)
+    session_meta.register(sub)
     resume.register(sub)
     recovery.register(sub)
     monitor.register(sub)

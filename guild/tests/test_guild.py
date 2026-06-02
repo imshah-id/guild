@@ -23,14 +23,17 @@ from guild import (  # noqa: E402
     scorecard, state, validation,
 )
 from guild.commands import completion as completion_cmd  # noqa: E402
+from guild.commands import doctor as doctor_cmd  # noqa: E402
 from guild.commands import init as init_cmd  # noqa: E402
 from guild.commands import plan as plan_cmd  # noqa: E402
 from guild.commands import recovery as recovery_cmd  # noqa: E402
 from guild.commands import report as report_cmd  # noqa: E402
 from guild.commands import resume as resume_cmd  # noqa: E402
 from guild.commands import run as run_cmd  # noqa: E402
+from guild.commands import session_meta as session_meta_cmd  # noqa: E402
 from guild.commands import sessions as sessions_cmd  # noqa: E402
 from guild.commands import status as status_cmd  # noqa: E402
+from guild.commands import timeline as timeline_cmd  # noqa: E402
 from guild import cli as cli_mod  # noqa: E402
 from guild.roles import READ_ONLY, WRITE, AgentSpec  # noqa: E402
 
@@ -359,6 +362,28 @@ class StatusSmokeTests(GuildTestBase):
         self.assertIn("not initialized", text)  # GUILD_DIR is None in this base
 
 
+class DoctorProjectTests(GuildTestBase):
+    def test_project_checks_cover_guild_files_and_placeholder_context(self) -> None:
+        config.GUILD_DIR = pathlib.Path(self._tmp) / ".guild"
+        config.PROJECT_ROOT = pathlib.Path(self._tmp)
+        config.RUNS_DIR = config.GUILD_DIR / "runs"
+        config.GUILD_DIR.mkdir()
+        config.RUNS_DIR.mkdir()
+        (config.GUILD_DIR / "config.json").write_text("{}")
+        (config.GUILD_DIR / "context.md").write_text("<fill this in>")
+        (config.RUNS_DIR / ".gitignore").write_text("*\n!.gitignore\n")
+
+        checks = doctor_cmd.project_checks()
+        levels = {check.item: check.level for check in checks}
+
+        self.assertEqual(levels[".guild"], "ok")
+        self.assertEqual(levels["config"], "ok")
+        self.assertEqual(levels["context"], "warn")
+        self.assertEqual(levels["runs"], "ok")
+        self.assertEqual(levels["runs gitignore"], "ok")
+        self.assertIn("context.md", "\n".join(doctor_cmd.project_check_lines(checks)))
+
+
 class HomeInterfaceTests(GuildTestBase):
     def test_home_lines_show_api_models_effort_and_usage(self) -> None:
         config.SETTINGS["agents"]["codex"]["model"] = "gpt-5"
@@ -447,6 +472,8 @@ class StateRoundTripTests(GuildTestBase):
     def test_session_load_reconstructs_dataclasses(self) -> None:
         session = state.Session.new("ship it", "checkpoint")
         session.status = "running"
+        session.labels = ["ui", "release"]
+        session.notes = [state.SessionNote(text="manual checkpoint", created=123.0)]
         session.steps = [
             state.Step(id="01-implement", phase="implement", title="build", status=state.DONE),
             state.Step(id="02-test", phase="test", title="verify", task="run tests"),
@@ -458,6 +485,9 @@ class StateRoundTripTests(GuildTestBase):
         self.assertEqual(loaded.goal, "ship it")
         self.assertEqual(loaded.gating, "checkpoint")
         self.assertEqual(loaded.status, "running")
+        self.assertEqual(loaded.labels, ["ui", "release"])
+        self.assertEqual(loaded.notes[0].text, "manual checkpoint")
+        self.assertEqual(loaded.notes[0].created, 123.0)
         self.assertEqual([s.id for s in loaded.steps], ["01-implement", "02-test"])
         self.assertIsInstance(loaded.steps[0], state.Step)
         self.assertEqual(loaded.steps[0].status, state.DONE)
@@ -512,6 +542,8 @@ class SessionCommandTests(GuildTestBase):
     def test_report_markdown_includes_step_details(self) -> None:
         session = state.Session.new("ship it", "checkpoint")
         session.status = "done"
+        session.labels = ["release"]
+        session.notes = [state.SessionNote(text="ready for QA", created=123.0)]
         session.steps = [
             state.Step(id="01-implement", phase="implement", title="build",
                        status=state.DONE, agent="codex", summary="changed app.py",
@@ -523,6 +555,9 @@ class SessionCommandTests(GuildTestBase):
         text = report_cmd.markdown_report(session)
         self.assertIn(f"# guild report: {session.id}", text)
         self.assertIn("- Goal: ship it", text)
+        self.assertIn("- Labels: release", text)
+        self.assertIn("## Notes", text)
+        self.assertIn("ready for QA", text)
         self.assertIn("### 1. build", text)
         self.assertIn("changed app.py", text)
         self.assertIn("`app.py`", text)
@@ -583,6 +618,49 @@ class SessionCommandTests(GuildTestBase):
         self.assertEqual(report_cmd._open_command(path, "darwin"), ["open", str(path)])
         self.assertEqual(report_cmd._open_command(path, "linux")[0], "xdg-open")
 
+    def test_label_unlabel_and_note_commands_persist_metadata(self) -> None:
+        session = state.Session.new("metadata", "guided")
+        session.save()
+
+        rc = session_meta_cmd.cmd_label(argparse.Namespace(
+            session=session.id, labels=["ui,release"],
+        ))
+        self.assertEqual(rc, 0)
+        rc = session_meta_cmd.cmd_note(argparse.Namespace(
+            session=session.id, text=["keep", "this", "context"],
+        ))
+        self.assertEqual(rc, 0)
+        rc = session_meta_cmd.cmd_unlabel(argparse.Namespace(
+            session=session.id, labels=["release"],
+        ))
+        self.assertEqual(rc, 0)
+
+        loaded = state.Session.load(session.id)
+        assert loaded is not None
+        self.assertEqual(loaded.labels, ["ui"])
+        self.assertEqual(loaded.notes[0].text, "keep this context")
+        self.assertIn("[ui]", "\n".join(sessions_cmd.session_lines()))
+
+    def test_timeline_lines_show_session_note_and_step_events(self) -> None:
+        session = state.Session.new("ship the feature", "guided")
+        session.created = 10.0
+        session.labels = ["ui"]
+        session.notes = [state.SessionNote(text="reviewed with product", created=20.0)]
+        session.steps = [
+            state.Step(id="01-implement", phase=state.IMPLEMENT, title="build",
+                       status=state.DONE, agent="codex", started=30.0, ended=40.0,
+                       summary="changed app.py"),
+        ]
+
+        text = "\n".join(timeline_cmd.timeline_lines(session))
+
+        self.assertIn("guild timeline", text)
+        self.assertIn("labels", text)
+        self.assertIn("reviewed with product", text)
+        self.assertIn("started", text)
+        self.assertIn("finished", text)
+        self.assertIn("changed app.py", text)
+
     def test_retry_resets_step_and_removes_generated_followups(self) -> None:
         session = state.Session.new("retry me", "guided")
         session.steps = [
@@ -642,7 +720,9 @@ class SessionCommandTests(GuildTestBase):
     def test_completion_scripts_include_commands(self) -> None:
         self.assertIn("guild", completion_cmd._bash())
         self.assertIn("resume", completion_cmd._fish())
+        self.assertIn("timeline", completion_cmd._bash())
         self.assertIn("--plan-only", completion_cmd._bash())
+        self.assertIn("--project", completion_cmd._bash())
         self.assertIn("--open", completion_cmd._zsh())
         self.assertIn("-l open", completion_cmd._fish())
 

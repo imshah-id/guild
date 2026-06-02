@@ -41,9 +41,15 @@ def markdown_report(session: state.Session) -> str:
         f"- Created: {_fmt_time(session.created)}",
         f"- Steps: {done} done, {skipped} skipped, {failed} failed/blocked, {len(session.steps)} total",
         "",
-        "## Steps",
-        "",
     ]
+    if session.labels:
+        lines.insert(3, f"- Labels: {', '.join(session.labels)}")
+    if session.notes:
+        lines.extend(["## Notes", ""])
+        for note in session.notes:
+            lines.append(f"- {_fmt_time(note.created)}: {_clean(note.text)}")
+        lines.append("")
+    lines.extend(["## Steps", ""])
 
     for index, step in enumerate(session.steps, start=1):
         title = step.title or step.id

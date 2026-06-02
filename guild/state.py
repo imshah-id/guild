@@ -62,6 +62,12 @@ class Step:
 
 
 @dataclass
+class SessionNote:
+    text: str
+    created: float = field(default_factory=time.time)
+
+
+@dataclass
 class Session:
     id: str
     goal: str
@@ -69,6 +75,8 @@ class Session:
     status: str = "planning"
     created: float = field(default_factory=time.time)
     cwd: str = field(default_factory=lambda: str(config.PROJECT_ROOT))
+    labels: list[str] = field(default_factory=list)
+    notes: list[SessionNote] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
 
     @property
@@ -102,9 +110,47 @@ class Session:
             for raw in data.get("steps", [])
             if isinstance(raw, dict)
         ]
-        session = Session(**_only_fields(Session, data, exclude={"steps"}))
+        session = Session(**_only_fields(Session, data, exclude={"steps", "notes", "labels"}))
+        session.labels = _clean_labels(data.get("labels", []))
+        session.notes = _clean_notes(data.get("notes", []))
         session.steps = steps
         return session
+
+
+def _clean_labels(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    labels: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        label = str(item).strip()
+        if label and label not in seen:
+            seen.add(label)
+            labels.append(label)
+    return labels
+
+
+def _clean_notes(raw: object) -> list[SessionNote]:
+    if not isinstance(raw, list):
+        return []
+    notes: list[SessionNote] = []
+    for item in raw:
+        if isinstance(item, str):
+            text = item.strip()
+            if text:
+                notes.append(SessionNote(text=text, created=0.0))
+            continue
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        try:
+            created = float(item.get("created", 0.0))
+        except (TypeError, ValueError):
+            created = 0.0
+        notes.append(SessionNote(text=text, created=created))
+    return notes
 
 
 def _only_fields(cls, data: dict, exclude: set[str] = frozenset()) -> dict:

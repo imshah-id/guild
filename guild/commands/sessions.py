@@ -27,6 +27,14 @@ def _age(path) -> str:
     return f"{seconds // 86400}d"
 
 
+def _labels(data: dict) -> str:
+    labels = data.get("labels", [])
+    if not isinstance(labels, list) or not labels:
+        return ""
+    clean = [str(label).strip() for label in labels if str(label).strip()]
+    return f" {render.DIM}[{', '.join(clean)}]{render.RESET}" if clean else ""
+
+
 def session_lines(limit: int = 20) -> list[str]:
     dirs = state.session_dirs()
     if limit > 0:
@@ -44,7 +52,8 @@ def session_lines(limit: int = 20) -> list[str]:
             goal = goal[:69] + "..."
         lines.append(
             f"  {render.status_chip(status):17} {render.CYAN}{session_id}{render.RESET}  "
-            f"{_progress(data)}  {render.DIM}{_age(directory / 'state.json')} ago{render.RESET}  {goal}"
+            f"{_progress(data)}  {render.DIM}{_age(directory / 'state.json')} ago{render.RESET}  "
+            f"{goal}{_labels(data)}"
         )
     return lines
 

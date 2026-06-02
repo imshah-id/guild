@@ -57,6 +57,9 @@ guild run "Add the XP ledger reducer, pure TS, with tests" --plan-only   # previ
 guild plan                # inspect or edit that saved plan
 guild run "Add the XP ledger reducer, pure TS, with tests"               # let it build
 guild sessions            # list previous runs
+guild label latest ui fix # tag a run so it is easier to find later
+guild note latest "Blocked on a flaky snapshot; retry after UI polish"
+guild timeline            # show chronological events for the latest run
 guild report              # print a Markdown report for the latest run
 guild report --open       # write and open .guild/runs/<id>/report.md
 guild monitor             # live dashboard, in a second pane
@@ -72,6 +75,17 @@ re-runs from scratch, and anything you already approved isn't re-asked.
 For targeted recovery, use `guild retry <session> <step>` to reset one step by index or id, or
 `guild skip <session> <step>` to mark one step skipped. Add `--run` to either command to resume
 immediately.
+
+Use labels and notes to keep long-running work navigable:
+
+```sh
+guild label latest frontend polish
+guild note latest "User wants Codex-style slash commands and richer color"
+guild unlabel latest polish
+guild timeline latest
+```
+
+Labels appear in `guild sessions`; labels and notes are included in `guild report`.
 
 Plans can be validated before execution:
 
@@ -146,9 +160,9 @@ Completion scripts include top-level commands plus common subcommand flags such 
 ## Terminal UI
 
 Run `guild` by itself to open the home interface. It is organized into structured terminal panels:
-overview, APIs/selected models/effort/availability/usage, latest session, quick actions, command
-output, and command input. Inside the interface, use slash commands such as `/status`,
-`/sessions`, `/report --open`, `/profiles`, `/doctor`, `/scorecard`, `/clear`, and `/help`.
+overview, APIs/selected models/effort/availability/usage, command output, and command input.
+Inside the interface, use slash commands such as `/status`, `/sessions`, `/timeline`,
+`/report --open`, `/profiles`, `/doctor`, `/scorecard`, `/clear`, and `/help`.
 Normal commands without the leading `guild` still work. Interactive flows like `run "<goal>"`
 launch best as normal shell commands so they can own the terminal. Usage comes from the local
 scorecard. The curses UI uses color accents for the title, sections, status, prompt, and command
@@ -172,7 +186,7 @@ dependencies. `guild monitor` keeps the live curses dashboard, while `guild moni
 ```
 guild/
   cli.py            arg parsing + dispatch
-  commands/         run, plan, retry/skip, sessions, report, status, monitor, config, init, doctor
+  commands/         run, plan, retry/skip, sessions, report, timeline, metadata, status, monitor
   config.py         layered config + project discovery
   roles.py          abstract roles, role->agent resolution, cross-review rule
   agents.py         agent adapters (claude/codex/agy), capability-aware, testable cmd builders
