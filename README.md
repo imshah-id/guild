@@ -19,12 +19,28 @@ steps always stop for your approval.
 ## Install
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/imshah-id/guild/main/install.sh | bash
+```
+
+Or from a checkout:
+
+```sh
+bash install.sh           # installs with pipx, falling back to pip --user
 pipx install .            # from a checkout
 # or
 pip install -e .          # editable, for hacking on guild itself
 ```
 
 This puts a `guild` command on your PATH. (No checkout? `python3 -m guild ...` works too.)
+
+Installer options:
+
+```sh
+bash install.sh --ref main
+bash install.sh --method pipx
+bash install.sh --method pip-user
+bash install.sh --local /path/to/guild
+```
 
 ## Quickstart
 
