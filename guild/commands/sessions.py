@@ -10,7 +10,7 @@ from .. import render, state
 def _progress(data: dict) -> str:
     steps = data.get("steps", [])
     done = sum(1 for s in steps if s.get("status") in (state.DONE, state.SKIPPED))
-    return f"{done}/{len(steps)}"
+    return render.progress(done, len(steps), width=10)
 
 
 def _age(path) -> str:
@@ -34,7 +34,7 @@ def session_lines(limit: int = 20) -> list[str]:
     if not dirs:
         return ["no sessions yet"]
 
-    lines = [f"{render.BOLD}sessions{render.RESET}"]
+    lines = [render.banner("guild sessions"), render.kv("showing", f"{len(dirs)} newest")]
     for directory in dirs:
         data = state.load_dict(directory / "state.json") or {}
         session_id = str(data.get("id") or directory.name)
@@ -43,9 +43,8 @@ def session_lines(limit: int = 20) -> list[str]:
         if len(goal) > 72:
             goal = goal[:69] + "..."
         lines.append(
-            f"  {render.CYAN}{session_id}{render.RESET}  "
-            f"{status:9}  {_progress(data):>5}  "
-            f"{render.DIM}{_age(directory / 'state.json')} ago{render.RESET}  {goal}"
+            f"  {render.status_chip(status):17} {render.CYAN}{session_id}{render.RESET}  "
+            f"{_progress(data)}  {render.DIM}{_age(directory / 'state.json')} ago{render.RESET}  {goal}"
         )
     return lines
 

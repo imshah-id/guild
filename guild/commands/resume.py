@@ -19,21 +19,22 @@ def _resume_lines(session: state.Session) -> list[str]:
     remaining = [s for s in session.steps if s.status not in (state.DONE, state.SKIPPED)]
     done = len(session.steps) - len(remaining)
     lines = [
-        f"{render.BOLD}guild resume{render.RESET}  session {render.CYAN}{session.id}{render.RESET}  "
-        f"({session.gating})  {render.DIM}{done}/{len(session.steps)} steps already done{render.RESET}"
+        render.banner(
+            "guild resume",
+            ("session", f"{render.CYAN}{session.id}{render.RESET}"),
+            ("gating", session.gating),
+            ("progress", f"{render.progress(done, len(session.steps))} steps already done"),
+        )
     ]
     running = [s for s in remaining if s.status == state.RUNNING]
     if running:
         names = ", ".join(s.title for s in running)
-        lines.append(f"{render.YELLOW}interrupted:{render.RESET} {names} will re-run from scratch")
+        lines.append(render.kv("interrupted:", f"{names} will re-run from scratch"))
     if remaining:
         next_step = remaining[0]
-        lines.append(
-            f"{render.DIM}next:{render.RESET} "
-            f"{render.phase_color(next_step.phase)}{next_step.phase}{render.RESET} {next_step.title}"
-        )
+        lines.append(render.kv("next:", f"{render.phase_chip(next_step.phase)} {next_step.title}"))
         if len(remaining) > 1:
-            lines.append(f"{render.DIM}remaining:{render.RESET} {len(remaining)} steps")
+            lines.append(render.kv("remaining:", f"{len(remaining)} steps"))
     return lines
 
 
@@ -72,7 +73,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
             step.status = state.PENDING
     session.save()
 
-    render.say(f"{render.DIM}watch live in another pane:{render.RESET}  guild monitor")
+    render.say(render.kv("watch", "guild monitor"))
     render.say(render.rule())
 
     try:

@@ -3,7 +3,7 @@
 Run your installed AI coding CLIs as a coordinated team. You give `guild` a goal; a **planner**
 agent decomposes it, hands the work to a **coder** agent, a **different** agent **reviews** every
 change, tests run, and bounded fix loops close the gaps, pausing only at the gates you choose. You
-watch it work from a live dashboard.
+watch it work from a structured terminal UI or a live dashboard.
 
 No model APIs and no cloud. The agents are the plain CLIs you already have (`claude`, `codex`,
 `agy`, and others you add); guild drives them as subprocesses and coordinates them through files.
@@ -109,6 +109,13 @@ guild completion fish
   pauses to approve the plan, any database / dependency / destructive step, and final acceptance.
 - **hands-off**: only the hard safety gates (database / dependency / destructive).
 - **checkpoint**: pause after every step.
+
+## Terminal UI
+
+Foreground runs use compact banners, phase chips, status marks, and progress bars so plans and
+review/fix loops are easy to scan without adding dependencies. `guild monitor` keeps the live
+curses dashboard, while `guild monitor --plain` and `guild monitor --json` provide script-friendly
+snapshots.
 
 ## Project layout it creates
 

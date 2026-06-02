@@ -85,14 +85,12 @@ class Pipeline:
         self._print_done(step)
 
     def _print_done(self, step: Step) -> None:
-        color = render.phase_color(step.phase)
-        mark = f"{render.GREEN}ok{render.RESET}" if step.status == DONE else f"{render.RED}x {render.RESET}"
-        agent = f"  {render.DIM}{step.agent}{render.RESET}" if step.agent else ""
-        extra = f"  {render.DIM}{step.verdict}{render.RESET}" if step.verdict else ""
-        render.say(
-            f"  {mark} {color}{step.phase:9}{render.RESET} {step.title}{agent}"
-            f"  {render.DIM}{int(step.elapsed())}s{render.RESET}{extra}"
-        )
+        render.say(render.step_row(
+            0, step.phase, step.status, step.title,
+            agent=step.agent,
+            elapsed=int(step.elapsed()),
+            verdict=step.verdict,
+        ))
 
     # --- task assembly ----------------------------------------------------------------
 
@@ -184,8 +182,9 @@ class Pipeline:
             self.gate(self._final_summary() + "\n  Accept and finish?", ["accept"])
         self.s.status = "done"
         self._save()
-        render.say(f"\n{render.GREEN}pipeline complete{render.RESET}  {self._counts()}")
-        render.say(f"{render.DIM}nothing was committed or merged; that stays with you.{render.RESET}")
+        render.say("")
+        render.say(render.section("pipeline complete", self._counts()))
+        render.say(render.kv("git", "nothing was committed or merged; that stays with you"))
 
     def _clear_human_gate(self, step: Step) -> bool:
         """Hard safety gate (DB, dependency, destructive). Applies in every mode. Returns
@@ -381,20 +380,21 @@ class Pipeline:
         render.say(f"{render.YELLOW}{message}{render.RESET}")
 
     def _print_plan(self) -> None:
-        render.say(f"\n{render.BOLD}plan{render.RESET} ({len(self.s.steps)} steps)")
-        for step in self.s.steps:
+        render.say("")
+        done = sum(1 for s in self.s.steps if s.status in (DONE, SKIPPED))
+        render.say(render.section("plan", f"{render.progress(done, len(self.s.steps))}"))
+        for index, step in enumerate(self.s.steps, start=1):
             flag = f"  {render.YELLOW}[needs approval]{render.RESET}" if step.needs_human else ""
-            color = render.phase_color(step.phase)
-            render.say(f"  - {color}{step.phase:9}{render.RESET} {step.title}{flag}")
+            render.say(render.step_row(index, step.phase, step.status, step.title, extra=flag.strip()))
         render.say(render.rule())
 
     def _counts(self) -> str:
         done = sum(1 for s in self.s.steps if s.status == DONE)
         failed = sum(1 for s in self.s.steps if s.status in (FAILED, BLOCKED))
-        return f"{render.DIM}{done} done, {failed} failed/blocked, {len(self.s.steps)} total{render.RESET}"
+        return f"{done} done, {failed} failed/blocked, {len(self.s.steps)} total"
 
     def _final_summary(self) -> str:
-        lines = [f"\n{render.BOLD}summary{render.RESET}  {self._counts()}"]
+        lines = ["", render.section("summary", self._counts())]
         for step in self.s.steps:
             if step.phase == REVIEW and step.verdict:
                 lines.append(f"  {render.DIM}{step.title}: {step.verdict}{render.RESET}")

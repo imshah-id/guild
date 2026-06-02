@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import state
+from . import render, state
 
 _STATUS_ICON = {
     "done": "ok",
@@ -56,13 +56,22 @@ def watch(state_path: Path) -> None:
 def snapshot_lines(data: dict | None) -> list[str]:
     if not data:
         return ["no session data"]
-    lines = [f"session {data.get('id')}  [{data.get('status')}]  goal: {data.get('goal')}"]
-    for step in data.get("steps", []):
-        icon = _STATUS_ICON.get(step.get("status", "pending"), "  ")
-        lines.append(
-            f"  [{icon}] {step.get('phase',''):9} {step.get('title','')}  "
-            f"{_elapsed(step)}s {step.get('verdict','')}"
-        )
+    steps = data.get("steps", [])
+    done = sum(1 for step in steps if step.get("status") in ("done", "skipped"))
+    lines = [
+        f"session {data.get('id')}  [{data.get('status')}]  goal: {data.get('goal')}",
+        render.kv("progress", render.progress(done, len(steps))),
+    ]
+    for index, step in enumerate(steps, start=1):
+        lines.append(render.step_row(
+            index,
+            step.get("phase", ""),
+            step.get("status", "pending"),
+            step.get("title", ""),
+            agent=step.get("agent", ""),
+            elapsed=_elapsed(step),
+            verdict=step.get("verdict", ""),
+        ))
     return lines
 
 

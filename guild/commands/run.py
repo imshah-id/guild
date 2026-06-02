@@ -10,11 +10,11 @@ from ..planner import PlanError, make_plan
 
 def _interactive_gate(prompt: str, options: list[str]) -> str:
     render.say("")
-    render.say(f"  {render.YELLOW}* gate:{render.RESET} {prompt}")
+    render.say(f"{render.section('gate')} {prompt}")
     labels = "/".join(options)
     while True:
         try:
-            answer = input(f"  choose [{labels}] (default {options[0]}): ").strip().lower()
+            answer = input(f"  choose [{labels}]  default={options[0]}: ").strip().lower()
         except EOFError:
             return options[0]
         if answer == "":
@@ -74,8 +74,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     gating = args.gating or config.setting("gating", config.DEFAULT_GATING)
     session = state.Session.new(args.goal, gating)
     session.save()
-    render.say(f"{render.BOLD}guild run{render.RESET}  session {render.CYAN}{session.id}{render.RESET}  ({gating})")
-    render.say(f"{render.DIM}watch live in another pane:{render.RESET}  guild monitor")
+    meta = [("session", f"{render.CYAN}{session.id}{render.RESET}"), ("gating", gating)]
+    if args.profile:
+        meta.append(("profile", args.profile))
+    render.say(render.banner("guild run", *meta))
+    render.say(render.kv("watch", "guild monitor"))
     render.say(render.rule())
     try:
         with render.Spinner("planner decomposing the goal"):
@@ -88,11 +91,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     if args.plan_only:
-        render.say(f"\n{render.BOLD}plan{render.RESET} ({len(session.steps)} steps)")
-        for step in session.steps:
+        render.say("")
+        render.say(render.section("plan", f"{len(session.steps)} steps"))
+        for index, step in enumerate(session.steps, start=1):
             flag = f"  {render.YELLOW}[needs approval]{render.RESET}" if step.needs_human else ""
-            render.say(f"  - {render.phase_color(step.phase)}{step.phase:9}{render.RESET} {step.title}{flag}")
-        render.say(f"\n{render.DIM}plan-only: stopping before execution. session {session.id}{render.RESET}")
+            render.say(render.step_row(index, step.phase, step.status, step.title, extra=flag.strip()))
+        render.say("")
+        render.say(render.kv("plan-only", f"session {session.id} saved; edit with `guild plan {session.id}`"))
         session.status = "planned"
         session.save()
         return 0

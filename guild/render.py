@@ -37,6 +37,26 @@ RED = _code("\033[31m")
 BLUE = _code("\033[34m")
 MAGENTA = _code("\033[35m")
 
+_STATUS_COLOR = {
+    "done": GREEN,
+    "running": CYAN,
+    "failed": RED,
+    "blocked": RED,
+    "needs_approval": YELLOW,
+    "skipped": DIM,
+    "pending": DIM,
+}
+
+_STATUS_MARK = {
+    "done": "OK",
+    "running": ">>",
+    "failed": "XX",
+    "blocked": "!!",
+    "needs_approval": "??",
+    "skipped": "--",
+    "pending": "..",
+}
+
 _PHASE_COLOR = {
     "research": BLUE,
     "implement": CYAN,
@@ -49,6 +69,71 @@ _PHASE_COLOR = {
 
 def phase_color(phase: str) -> str:
     return _PHASE_COLOR.get(phase, "")
+
+
+def status_mark(status: str) -> str:
+    """Small colored status marker that still reads clearly without ANSI support."""
+    color = _STATUS_COLOR.get(status, "")
+    mark = _STATUS_MARK.get(status, "  ")
+    return f"{color}{mark}{RESET}"
+
+
+def chip(text: str, *, color: str = "") -> str:
+    return f"{color}[{text}]{RESET}"
+
+
+def phase_chip(phase: str, width: int = 9) -> str:
+    label = phase.upper()[:width].ljust(width)
+    return chip(label, color=phase_color(phase))
+
+
+def status_chip(status: str) -> str:
+    return chip(status.replace("_", "-"), color=_STATUS_COLOR.get(status, ""))
+
+
+def progress(done: int, total: int, width: int = 18) -> str:
+    if total <= 0:
+        return f"[{'-' * width}] 0/0"
+    filled = round((done / total) * width)
+    filled = max(0, min(width, filled))
+    return f"[{'#' * filled}{'-' * (width - filled)}] {done}/{total}"
+
+
+def section(title: str, detail: str = "") -> str:
+    suffix = f" {DIM}{detail}{RESET}" if detail else ""
+    return f"{BOLD}{title}{RESET}{suffix}"
+
+
+def kv(label: str, value: object, width: int = 11) -> str:
+    return f"  {DIM}{label:<{width}}{RESET} {value}"
+
+
+def banner(title: str, *items: tuple[str, object]) -> str:
+    meta = "  ".join(f"{DIM}{key}{RESET} {value}" for key, value in items if value not in ("", None))
+    return f"{BOLD}{title}{RESET}" + (f"\n{meta}" if meta else "")
+
+
+def step_row(index: int, phase: str, status: str, title: str, *, agent: str = "",
+             elapsed: int = 0, verdict: str = "", extra: str = "") -> str:
+    bits = [
+        status_mark(status),
+        phase_chip(phase),
+        title,
+    ]
+    if index > 0:
+        bits.insert(0, f"  {index:>2}")
+    else:
+        bits.insert(0, "  ")
+    meta: list[str] = []
+    if agent:
+        meta.append(agent)
+    if elapsed:
+        meta.append(f"{elapsed}s")
+    if verdict:
+        meta.append(verdict)
+    if extra:
+        meta.append(extra)
+    return " ".join(bits) + (f"  {DIM}{'  '.join(meta)}{RESET}" if meta else "")
 
 
 def say(msg: str = "") -> None:

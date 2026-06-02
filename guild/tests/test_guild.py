@@ -19,7 +19,7 @@ from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from guild import (  # noqa: E402
-    agents, compaction, config, context, monitor, pipeline, planner, prompts, roles,
+    agents, compaction, config, context, monitor, pipeline, planner, prompts, render, roles,
     scorecard, state,
 )
 from guild.commands import completion as completion_cmd  # noqa: E402
@@ -129,6 +129,18 @@ class CompactionTests(unittest.TestCase):
         self.assertIn("Major", out)
         self.assertIn("Blocker", out)
         self.assertNotIn("rename x to count", out)
+
+
+class RenderTests(unittest.TestCase):
+    def test_progress_bar_keeps_ratio_text(self) -> None:
+        self.assertIn("1/2", render.progress(1, 2, width=4))
+
+    def test_step_row_contains_status_phase_and_title(self) -> None:
+        row = render.step_row(1, state.IMPLEMENT, state.DONE, "build it", agent="codex", verdict="APPROVE")
+        self.assertIn("OK", row)
+        self.assertIn("IMPLEMENT", row)
+        self.assertIn("build it", row)
+        self.assertIn("codex", row)
 
 
 # --- config layering + discovery ---------------------------------------------------------
