@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from dataclasses import dataclass
 
@@ -112,18 +113,51 @@ def timeline_lines(session: state.Session) -> list[str]:
     return lines
 
 
+def timeline_data(session: state.Session) -> dict:
+    return {
+        "session": {
+            "id": session.id,
+            "goal": session.goal,
+            "status": session.status,
+            "gating": session.gating,
+            "created": session.created,
+            "created_time": _fmt_time(session.created),
+            "labels": list(session.labels),
+        },
+        "events": [
+            {
+                "timestamp": item.timestamp,
+                "time": _fmt_time(item.timestamp),
+                "kind": item.kind,
+                "detail": item.detail,
+                "status": item.status,
+                "phase": item.phase,
+            }
+            for item in timeline_items(session)
+        ],
+    }
+
+
+def timeline_json(session: state.Session) -> str:
+    return json.dumps(timeline_data(session), indent=2) + "\n"
+
+
 def cmd_timeline(args: argparse.Namespace) -> int:
     session = _load_session(args.session)
     if session is None:
         target = args.session or "latest"
         render.say(f"{render.RED}no such session:{render.RESET} {target}")
         return 1
-    for line in timeline_lines(session):
-        render.out(line)
+    if args.json:
+        render.out(timeline_json(session).rstrip())
+    else:
+        for line in timeline_lines(session):
+            render.out(line)
     return 0
 
 
 def register(subparsers) -> None:
     parser = subparsers.add_parser("timeline", help="show chronological events for a session")
     parser.add_argument("session", nargs="?", help="session id (default: the most recent)")
+    parser.add_argument("--json", action="store_true", help="print timeline events as JSON")
     parser.set_defaults(func=cmd_timeline, needs_project=True)

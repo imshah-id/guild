@@ -57,10 +57,13 @@ guild run "Add the XP ledger reducer, pure TS, with tests" --plan-only   # previ
 guild plan                # inspect or edit that saved plan
 guild run "Add the XP ledger reducer, pure TS, with tests"               # let it build
 guild sessions            # list previous runs
+guild sessions --label ui --status done -q checkout
 guild label latest ui fix # tag a run so it is easier to find later
 guild note latest "Blocked on a flaky snapshot; retry after UI polish"
 guild timeline            # show chronological events for the latest run
+guild timeline --json     # script-friendly event stream
 guild report              # print a Markdown report for the latest run
+guild report --json       # structured run summary
 guild report --open       # write and open .guild/runs/<id>/report.md
 guild monitor             # live dashboard, in a second pane
 guild monitor --plain     # one-shot text snapshot
@@ -86,6 +89,8 @@ guild timeline latest
 ```
 
 Labels appear in `guild sessions`; labels and notes are included in `guild report`.
+Use `guild sessions --status done`, `guild sessions --label frontend`, or
+`guild sessions -q "snapshot"` to narrow a busy run history.
 
 Plans can be validated before execution:
 
@@ -148,7 +153,7 @@ guild completion fish
 ```
 
 Completion scripts include top-level commands plus common subcommand flags such as
-`run --plan-only`, `plan --validate`, `report --open`, and `monitor --json`.
+`run --plan-only`, `plan --validate`, `sessions --status`, `report --json`, and `monitor --json`.
 
 ## Gating (where it stops for you)
 
@@ -162,14 +167,16 @@ Completion scripts include top-level commands plus common subcommand flags such 
 Run `guild` by itself to open the home interface. It is organized into structured terminal panels:
 overview, APIs/selected models/effort/availability/usage, command output, and command input.
 Inside the interface, use slash commands such as `/status`, `/sessions`, `/timeline`,
-`/report --open`, `/profiles`, `/doctor`, `/scorecard`, `/clear`, and `/help`.
+`/agents`, `/report --open`, `/profiles`, `/doctor`, `/scorecard`, `/clear`, and `/help`.
 Normal commands without the leading `guild` still work. Interactive flows like `run "<goal>"`
 launch best as normal shell commands so they can own the terminal. Usage comes from the local
-scorecard. The curses UI uses color accents for the title, sections, status, prompt, and command
-output while keeping plain snapshots readable. Foreground runs use compact banners, phase chips,
-status marks, and progress bars so plans and review/fix loops are easy to scan without adding
-dependencies. `guild monitor` keeps the live curses dashboard, while `guild monitor --plain` and
-`guild monitor --json` provide script-friendly snapshots.
+scorecard; `/agents` expands that into per-agent roles, model/effort, access, availability,
+phase counts, verdict counts, and average runtime. The curses UI uses color accents for the
+title, sections, status, prompt, and command output while keeping plain snapshots readable.
+Foreground runs use compact banners, phase chips, status marks, and progress bars so plans and
+review/fix loops are easy to scan without adding dependencies. `guild monitor` keeps the live
+curses dashboard, while `guild monitor --plain` and `guild monitor --json` provide
+script-friendly snapshots.
 
 ## Project layout it creates
 

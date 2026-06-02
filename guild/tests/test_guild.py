@@ -417,6 +417,7 @@ class HomeInterfaceTests(GuildTestBase):
         self.assertEqual(home._normalize_command("?"), ["help"])
         self.assertEqual(home._normalize_command("/profiles"), ["config", "profiles"])
         self.assertEqual(home._normalize_command("/report --open"), ["report", "--open"])
+        self.assertEqual(home._normalize_command("/agents"), ["agents-view"])
 
     def test_home_embedded_command_blocks_interactive_flows(self) -> None:
         lines, rc = home.run_embedded_command('run "ship it"')
@@ -454,6 +455,19 @@ class HomeInterfaceTests(GuildTestBase):
 
         self.assertEqual(rc, 0)
         self.assertIn("fast", "\n".join(lines))
+
+    def test_home_agents_view_shows_scorecard_detail(self) -> None:
+        config.GUILD_DIR = pathlib.Path(self._tmp) / ".guild"
+        scorecard.record_step(state.Step(id="01-review", phase=state.REVIEW, title="review",
+                                         status=state.DONE, agent="claude", verdict="APPROVE"))
+
+        lines, rc = home.run_embedded_command("/agents")
+        text = "\n".join(lines)
+
+        self.assertEqual(rc, 0)
+        self.assertIn("Agent details", text)
+        self.assertIn("claude", text)
+        self.assertIn("verdicts APPROVE=1", text)
 
 
 # --- state round trip --------------------------------------------------------------------
@@ -539,6 +553,26 @@ class SessionCommandTests(GuildTestBase):
         self.assertIn("1/2", text)
         self.assertIn("make the thing", text)
 
+    def test_sessions_lines_filter_by_status_label_and_query(self) -> None:
+        keep = state.Session.new("checkout polish", "guided")
+        keep.status = "done"
+        keep.labels = ["ui", "release"]
+        keep.notes = [state.SessionNote(text="needs visual pass", created=1.0)]
+        keep.save()
+        drop = state.Session.new("backend cleanup", "guided")
+        drop.status = "running"
+        drop.labels = ["api"]
+        drop.save()
+
+        text = "\n".join(sessions_cmd.session_lines(
+            status="done", labels=["ui"], query="visual",
+        ))
+
+        self.assertIn(keep.id, text)
+        self.assertNotIn(drop.id, text)
+        self.assertIn("status=done", text)
+        self.assertIn("label=ui", text)
+
     def test_report_markdown_includes_step_details(self) -> None:
         session = state.Session.new("ship it", "checkpoint")
         session.status = "done"
@@ -563,6 +597,24 @@ class SessionCommandTests(GuildTestBase):
         self.assertIn("`app.py`", text)
         self.assertIn("app.py | 2 ++", text)
         self.assertIn("- Verdict: APPROVE", text)
+
+    def test_report_json_includes_metadata_counts_and_steps(self) -> None:
+        session = state.Session.new("ship json", "guided")
+        session.status = "done"
+        session.labels = ["automation"]
+        session.notes = [state.SessionNote(text="json export", created=123.0)]
+        session.steps = [
+            state.Step(id="01-test", phase=state.TEST, title="verify",
+                       status=state.DONE, agent="codex", started=10.0, ended=15.0),
+        ]
+
+        data = json.loads(report_cmd.json_report(session))
+
+        self.assertEqual(data["id"], session.id)
+        self.assertEqual(data["labels"], ["automation"])
+        self.assertEqual(data["counts"]["done"], 1)
+        self.assertEqual(data["notes"][0]["text"], "json export")
+        self.assertEqual(data["steps"][0]["elapsed_seconds"], 5)
 
     def test_resume_lines_show_next_and_interrupted_step(self) -> None:
         session = state.Session.new("resume me", "guided")
@@ -607,7 +659,7 @@ class SessionCommandTests(GuildTestBase):
         session.save()
 
         with mock.patch.object(report_cmd, "_open_path", return_value=True) as opened:
-            rc = report_cmd.cmd_report(argparse.Namespace(id=session.id, output=None, open=True))
+            rc = report_cmd.cmd_report(argparse.Namespace(id=session.id, output=None, open=True, json=False))
 
         self.assertEqual(rc, 0)
         self.assertTrue((session.dir / "report.md").exists())
@@ -660,6 +712,23 @@ class SessionCommandTests(GuildTestBase):
         self.assertIn("started", text)
         self.assertIn("finished", text)
         self.assertIn("changed app.py", text)
+
+    def test_timeline_json_includes_event_list(self) -> None:
+        session = state.Session.new("ship timeline json", "guided")
+        session.created = 10.0
+        session.labels = ["ui"]
+        session.steps = [
+            state.Step(id="01-test", phase=state.TEST, title="verify",
+                       status=state.DONE, started=20.0, ended=30.0, summary="passed"),
+        ]
+
+        data = json.loads(timeline_cmd.timeline_json(session))
+
+        self.assertEqual(data["session"]["id"], session.id)
+        self.assertEqual(data["session"]["labels"], ["ui"])
+        self.assertEqual([event["kind"] for event in data["events"]],
+                         ["session", "started", "finished"])
+        self.assertEqual(data["events"][-1]["detail"], "01-test passed")
 
     def test_retry_resets_step_and_removes_generated_followups(self) -> None:
         session = state.Session.new("retry me", "guided")
@@ -723,6 +792,8 @@ class SessionCommandTests(GuildTestBase):
         self.assertIn("timeline", completion_cmd._bash())
         self.assertIn("--plan-only", completion_cmd._bash())
         self.assertIn("--project", completion_cmd._bash())
+        self.assertIn("--status", completion_cmd._bash())
+        self.assertIn("--json", completion_cmd._bash())
         self.assertIn("--open", completion_cmd._zsh())
         self.assertIn("-l open", completion_cmd._fish())
 

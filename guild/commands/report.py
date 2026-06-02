@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import time
@@ -25,6 +26,62 @@ def _elapsed(step: state.Step) -> str:
 
 def _clean(text: str) -> str:
     return text.strip() or "-"
+
+
+def report_data(session: state.Session) -> dict:
+    done = sum(1 for s in session.steps if s.status == state.DONE)
+    skipped = sum(1 for s in session.steps if s.status == state.SKIPPED)
+    failed = sum(1 for s in session.steps if s.status in (state.FAILED, state.BLOCKED))
+    return {
+        "id": session.id,
+        "goal": session.goal,
+        "status": session.status,
+        "gating": session.gating,
+        "created": session.created,
+        "cwd": session.cwd,
+        "labels": list(session.labels),
+        "notes": [
+            {"text": note.text, "created": note.created, "created_time": _fmt_time(note.created)}
+            for note in session.notes
+        ],
+        "counts": {
+            "done": done,
+            "skipped": skipped,
+            "failed_or_blocked": failed,
+            "total": len(session.steps),
+        },
+        "steps": [
+            {
+                "id": step.id,
+                "phase": step.phase,
+                "title": step.title,
+                "task": step.task,
+                "status": step.status,
+                "agent": step.agent,
+                "summary": step.summary,
+                "verdict": step.verdict,
+                "attempts": step.attempts,
+                "needs_human": step.needs_human,
+                "human_reason": step.human_reason,
+                "parallel_group": step.parallel_group,
+                "depends_on": list(step.depends_on),
+                "changed_files": list(step.changed_files),
+                "diff_stat": step.diff_stat,
+                "started": step.started,
+                "ended": step.ended,
+                "started_time": _fmt_time(step.started),
+                "ended_time": _fmt_time(step.ended),
+                "elapsed_seconds": int(step.elapsed()),
+                "returncode": step.returncode,
+                "run_dir": step.run_dir,
+            }
+            for step in session.steps
+        ],
+    }
+
+
+def json_report(session: state.Session) -> str:
+    return json.dumps(report_data(session), indent=2) + "\n"
 
 
 def markdown_report(session: state.Session) -> str:
@@ -109,9 +166,10 @@ def cmd_report(args: argparse.Namespace) -> int:
         render.say(f"{render.RED}no such session:{render.RESET} {target}")
         return 1
 
-    text = markdown_report(session)
+    text = json_report(session) if args.json else markdown_report(session)
     if args.output or args.open:
-        path = Path(args.output) if args.output else session.dir / "report.md"
+        default_name = "report.json" if args.json else "report.md"
+        path = Path(args.output) if args.output else session.dir / default_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
         render.say(f"wrote {render.CYAN}{path}{render.RESET}")
@@ -128,6 +186,7 @@ def register(subparsers) -> None:
     parser = subparsers.add_parser("report", help="write a Markdown summary for a session")
     parser.add_argument("id", nargs="?", help="session id (default: the most recent)")
     parser.add_argument("-o", "--output", help="write the report to this path instead of stdout")
+    parser.add_argument("--json", action="store_true", help="print or write a structured JSON report")
     parser.add_argument("--open", action="store_true",
                         help="write the report, then open it with the system viewer")
     parser.set_defaults(func=cmd_report, needs_project=True)

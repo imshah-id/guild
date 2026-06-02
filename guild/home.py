@@ -51,6 +51,7 @@ _SLASH_COMMANDS: dict[str, list[str]] = {
     "/sessions": ["sessions"],
     "/report": ["report"],
     "/timeline": ["timeline"],
+    "/agents": ["agents-view"],
     "/profiles": ["config", "profiles"],
     "/config": ["config"],
     "/doctor": ["doctor"],
@@ -86,6 +87,55 @@ def _agent_usage(data: dict, agent: str) -> str:
     if total == 0:
         return "no runs yet"
     return f"{ok}/{total} ok, {failed} fail, avg {avg}s"
+
+
+def _agent_item(data: dict, agent: str) -> dict:
+    agents = data.get("agents", {}) if isinstance(data, dict) else {}
+    item = agents.get(agent, {}) if isinstance(agents, dict) else {}
+    return item if isinstance(item, dict) else {}
+
+
+def _phase_summary(item: dict) -> str:
+    phases = item.get("phases", {})
+    if not isinstance(phases, dict) or not phases:
+        return "phases none"
+    bits: list[str] = []
+    for phase in sorted(phases):
+        data = phases.get(phase, {})
+        if not isinstance(data, dict):
+            continue
+        total = int(data.get("total", 0))
+        ok = int(data.get("ok", 0))
+        bits.append(f"{phase}:{ok}/{total}")
+    return "phases " + (", ".join(bits) if bits else "none")
+
+
+def _verdict_summary(item: dict) -> str:
+    verdicts = item.get("verdicts", {})
+    if not isinstance(verdicts, dict) or not verdicts:
+        return "verdicts none"
+    bits = [f"{name}={count}" for name, count in sorted(verdicts.items())]
+    return "verdicts " + ", ".join(bits)
+
+
+def agent_detail_lines() -> list[str]:
+    usage = scorecard.load()
+    lines = ["Agent details"]
+    for row in agent_rows():
+        item = _agent_item(usage, row.agent)
+        total = int(item.get("total", 0))
+        ok = int(item.get("ok", 0))
+        failed = int(item.get("failed", 0))
+        avg = int(item.get("seconds", 0)) // total if total else 0
+        model = f"model {row.model}"
+        effort = f"effort {row.effort}"
+        lines.append(
+            f"{row.agent}: {row.assigned_roles} | {model} | {effort} | "
+            f"{row.access} | {row.status} | {ok}/{total} ok, {failed} fail, avg {avg}s"
+        )
+        detail = " | ".join(part for part in (_phase_summary(item), _verdict_summary(item)) if part)
+        lines.append(f"  {detail}")
+    return lines
 
 
 def _latest_data() -> dict:
@@ -218,6 +268,7 @@ def _quicklinks_lines() -> list[str]:
         "/status     inspect the resolved setup",
         "/sessions   browse previous runs",
         "/timeline   show the latest run events",
+        "/agents     inspect agent usage detail",
         "/profiles   model & effort presets",
         "/report     open the latest summary",
         "/help       all slash commands",
@@ -477,10 +528,12 @@ def run_embedded_command(command: str) -> tuple[list[str], int]:
         return ["Press q to quit the home interface."], 0
     if parts[0] == "help":
         return [
-            "Slash commands: /status, /sessions, /timeline, /report --open, /profiles, /doctor, /scorecard, /clear, /quit",
+            "Slash commands: /status, /sessions, /timeline, /agents, /report --open, /profiles, /doctor, /scorecard, /clear, /quit",
             "You can also type normal guild commands without the leading `guild`.",
             "Interactive flows like run/resume/monitor should be launched outside this screen.",
         ], 0
+    if parts[0] == "agents-view":
+        return agent_detail_lines(), 0
     if parts[0] in _EMBEDDED_BLOCKED:
         return [
             f"`guild {parts[0]}` needs its own terminal flow.",
