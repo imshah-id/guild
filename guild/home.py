@@ -9,6 +9,7 @@ from __future__ import annotations
 import curses
 import io
 import locale
+import re
 import shutil
 import shlex
 import sys
@@ -19,6 +20,7 @@ from . import __version__, config, roles, scorecard, state
 
 DEFAULT_WIDTH = 108
 MIN_WIDTH = 72
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,12 @@ def _clip(text: object, width: int) -> str:
 
 def _pad(text: object, width: int) -> str:
     return _clip(text, width).ljust(width)
+
+
+def _sanitize_terminal_output(text: str) -> str:
+    text = _ANSI_RE.sub("", text)
+    text = text.replace("\r", "\n")
+    return "\n".join(line.rstrip() for line in text.splitlines()).strip()
 
 
 def _agent_usage(data: dict, agent: str) -> str:
@@ -336,7 +344,7 @@ def _transcript_body(ui: HomeState) -> list[str]:
 def _output_section(ui: HomeState, width: int) -> list[str]:
     return [
         _box_top("Command output", width),
-        *[_row(line, width) for line in _transcript_body(ui)],
+        *[_row(_sanitize_terminal_output(line), width) for line in _transcript_body(ui)],
         _box_bottom(width),
     ]
 
@@ -631,6 +639,6 @@ def run_embedded_command(command: str) -> tuple[list[str], int]:
     except Exception as exc:  # Keep the home interface alive.
         return [f"error: {exc}"], 1
 
-    text = (out.getvalue() + err.getvalue()).strip()
+    text = _sanitize_terminal_output(out.getvalue() + err.getvalue())
     lines = text.splitlines() if text else [f"guild {' '.join(parts)} finished with no output"]
     return lines[-8:], rc

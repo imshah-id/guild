@@ -502,6 +502,15 @@ class HomeInterfaceTests(GuildTestBase):
         self.assertIn("/status      show resolved setup", text)
         self.assertIn("/quite       exit the home interface", text)
 
+    def test_home_output_strips_ansi_sequences(self) -> None:
+        ui = home.HomeState(transcript=["\x1b[32mok  \x1b[0m planner"])
+
+        text = "\n".join(home.dashboard_lines(100, ui))
+
+        self.assertIn("ok   planner", text)
+        self.assertNotIn("\x1b", text)
+        self.assertNotIn("^[[", text)
+
     def test_home_embedded_command_normalizes_guild_prefix(self) -> None:
         self.assertEqual(home._normalize_command("guild status"), ["status"])
         self.assertEqual(home._normalize_command("?"), ["help"])
@@ -581,6 +590,19 @@ class HomeInterfaceTests(GuildTestBase):
 
         self.assertEqual(rc, 0)
         self.assertIn("fast", "\n".join(lines))
+
+    def test_home_embedded_command_strips_ansi_output(self) -> None:
+        def fake_main(parts):
+            print("\x1b[32mok  \x1b[0m planner")
+            return 0
+
+        with mock.patch.object(cli_mod, "main", fake_main):
+            lines, rc = home.run_embedded_command("status")
+
+        text = "\n".join(lines)
+        self.assertEqual(rc, 0)
+        self.assertIn("ok   planner", text)
+        self.assertNotIn("\x1b", text)
 
     def test_home_agents_view_shows_scorecard_detail(self) -> None:
         config.GUILD_DIR = pathlib.Path(self._tmp) / ".guild"
