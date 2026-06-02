@@ -15,6 +15,28 @@ from ..pipeline import Pipeline, PipelineAbort
 from .run import _interactive_gate
 
 
+def _resume_lines(session: state.Session) -> list[str]:
+    remaining = [s for s in session.steps if s.status not in (state.DONE, state.SKIPPED)]
+    done = len(session.steps) - len(remaining)
+    lines = [
+        f"{render.BOLD}guild resume{render.RESET}  session {render.CYAN}{session.id}{render.RESET}  "
+        f"({session.gating})  {render.DIM}{done}/{len(session.steps)} steps already done{render.RESET}"
+    ]
+    running = [s for s in remaining if s.status == state.RUNNING]
+    if running:
+        names = ", ".join(s.title for s in running)
+        lines.append(f"{render.YELLOW}interrupted:{render.RESET} {names} will re-run from scratch")
+    if remaining:
+        next_step = remaining[0]
+        lines.append(
+            f"{render.DIM}next:{render.RESET} "
+            f"{render.phase_color(next_step.phase)}{next_step.phase}{render.RESET} {next_step.title}"
+        )
+        if len(remaining) > 1:
+            lines.append(f"{render.DIM}remaining:{render.RESET} {len(remaining)} steps")
+    return lines
+
+
 def cmd_resume(args: argparse.Namespace) -> int:
     if config.GUILD_DIR is None:
         render.say(f"{render.YELLOW}no project here.{render.RESET} Run `guild init` first.")
@@ -41,15 +63,15 @@ def cmd_resume(args: argparse.Namespace) -> int:
         render.say(f"session {render.CYAN}{session.id}{render.RESET} has no remaining steps.")
         return 0
 
+    for line in _resume_lines(session):
+        render.say(line)
+
     # A step left RUNNING was interrupted; reset it to pending so it re-runs from scratch.
     for step in session.steps:
         if step.status == state.RUNNING:
             step.status = state.PENDING
     session.save()
 
-    done = len(session.steps) - len(remaining)
-    render.say(f"{render.BOLD}guild resume{render.RESET}  session {render.CYAN}{session.id}{render.RESET}  "
-               f"({session.gating})  {render.DIM}{done}/{len(session.steps)} steps already done{render.RESET}")
     render.say(f"{render.DIM}watch live in another pane:{render.RESET}  guild monitor")
     render.say(render.rule())
 

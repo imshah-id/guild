@@ -21,6 +21,9 @@ from guild import (  # noqa: E402
     agents, compaction, config, context, pipeline, planner, prompts, roles, state,
 )
 from guild.commands import init as init_cmd  # noqa: E402
+from guild.commands import report as report_cmd  # noqa: E402
+from guild.commands import resume as resume_cmd  # noqa: E402
+from guild.commands import sessions as sessions_cmd  # noqa: E402
 from guild.commands import status as status_cmd  # noqa: E402
 from guild.roles import READ_ONLY, WRITE, AgentSpec  # noqa: E402
 
@@ -321,6 +324,66 @@ class StateRoundTripTests(GuildTestBase):
         assert loaded is not None
         self.assertEqual(loaded.steps[0].id, "01-implement")
         self.assertFalse(hasattr(loaded, "from_a_newer_version"))
+
+    def test_session_dirs_newest_first(self) -> None:
+        older = state.Session.new("old", "guided")
+        older.save()
+        newer = state.Session.new("new", "guided")
+        newer.save()
+        os.utime(older.state_path(), (100, 100))
+        os.utime(newer.state_path(), (200, 200))
+
+        ordered = state.session_dirs()
+        self.assertEqual([p.name for p in ordered[:2]], [newer.id, older.id])
+
+
+# --- session/report commands ------------------------------------------------------------
+
+class SessionCommandTests(GuildTestBase):
+    def test_sessions_lines_show_progress(self) -> None:
+        session = state.Session.new("make the thing", "guided")
+        session.status = "running"
+        session.steps = [
+            state.Step(id="01-implement", phase="implement", title="build", status=state.DONE),
+            state.Step(id="02-test", phase="test", title="test"),
+        ]
+        session.save()
+
+        text = "\n".join(sessions_cmd.session_lines())
+        self.assertIn(session.id, text)
+        self.assertIn("running", text)
+        self.assertIn("1/2", text)
+        self.assertIn("make the thing", text)
+
+    def test_report_markdown_includes_step_details(self) -> None:
+        session = state.Session.new("ship it", "checkpoint")
+        session.status = "done"
+        session.steps = [
+            state.Step(id="01-implement", phase="implement", title="build",
+                       status=state.DONE, agent="codex", summary="changed app.py"),
+            state.Step(id="01-implement-review", phase="review", title="review: build",
+                       status=state.DONE, agent="claude", verdict="APPROVE"),
+        ]
+
+        text = report_cmd.markdown_report(session)
+        self.assertIn(f"# guild report: {session.id}", text)
+        self.assertIn("- Goal: ship it", text)
+        self.assertIn("### 1. build", text)
+        self.assertIn("changed app.py", text)
+        self.assertIn("- Verdict: APPROVE", text)
+
+    def test_resume_lines_show_next_and_interrupted_step(self) -> None:
+        session = state.Session.new("resume me", "guided")
+        session.steps = [
+            state.Step(id="01-implement", phase="implement", title="done", status=state.DONE),
+            state.Step(id="02-test", phase="test", title="halfway", status=state.RUNNING),
+        ]
+
+        text = "\n".join(resume_cmd._resume_lines(session))
+        self.assertIn("1/2 steps already done", text)
+        self.assertIn("interrupted:", text)
+        self.assertIn("next:", text)
+        self.assertIn("halfway", text)
 
 
 # --- pipeline engine (mocked agents) -----------------------------------------------------

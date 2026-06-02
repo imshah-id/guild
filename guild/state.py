@@ -118,12 +118,18 @@ def load_dict(state_path: Path) -> dict | None:
 
 
 def latest_session_dir() -> Path | None:
-    if not config.RUNS_DIR.exists():
+    sessions = session_dirs()
+    if not sessions:
         return None
+    return sessions[0]
+
+
+def session_dirs() -> list[Path]:
+    """Return session directories newest first, considering only dirs with a readable state."""
+    if not config.RUNS_DIR.exists():
+        return []
     sessions = [
         p for p in config.RUNS_DIR.iterdir()
         if p.is_dir() and (p / "state.json").exists()
     ]
-    if not sessions:
-        return None
-    return max(sessions, key=lambda p: (p / "state.json").stat().st_mtime)
+    return sorted(sessions, key=lambda p: (p / "state.json").stat().st_mtime, reverse=True)

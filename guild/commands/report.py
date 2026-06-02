@@ -1,0 +1,97 @@
+"""`guild report [id]`: render a Markdown summary for a session."""
+from __future__ import annotations
+
+import argparse
+import time
+from pathlib import Path
+
+from .. import render, state
+
+
+def _fmt_time(timestamp: float) -> str:
+    if not timestamp:
+        return "-"
+    return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(timestamp))
+
+
+def _elapsed(step: state.Step) -> str:
+    seconds = int(step.elapsed())
+    if seconds < 60:
+        return f"{seconds}s"
+    return f"{seconds // 60}m {seconds % 60}s"
+
+
+def _clean(text: str) -> str:
+    return text.strip() or "-"
+
+
+def markdown_report(session: state.Session) -> str:
+    done = sum(1 for s in session.steps if s.status == state.DONE)
+    skipped = sum(1 for s in session.steps if s.status == state.SKIPPED)
+    failed = sum(1 for s in session.steps if s.status in (state.FAILED, state.BLOCKED))
+
+    lines = [
+        f"# guild report: {session.id}",
+        "",
+        f"- Goal: {_clean(session.goal)}",
+        f"- Status: {session.status}",
+        f"- Gating: {session.gating}",
+        f"- Created: {_fmt_time(session.created)}",
+        f"- Steps: {done} done, {skipped} skipped, {failed} failed/blocked, {len(session.steps)} total",
+        "",
+        "## Steps",
+        "",
+    ]
+
+    for index, step in enumerate(session.steps, start=1):
+        title = step.title or step.id
+        lines.extend([
+            f"### {index}. {title}",
+            "",
+            f"- Phase: {step.phase}",
+            f"- Status: {step.status}",
+            f"- Agent: {step.agent or '-'}",
+            f"- Elapsed: {_elapsed(step)}",
+        ])
+        if step.verdict:
+            lines.append(f"- Verdict: {step.verdict}")
+        if step.run_dir:
+            lines.append(f"- Run dir: `{step.run_dir}`")
+        if step.summary:
+            lines.extend(["", _clean(step.summary)])
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _load_session(session_id: str | None) -> state.Session | None:
+    if session_id:
+        return state.Session.load(session_id)
+    latest = state.latest_session_dir()
+    if latest is None:
+        return None
+    return state.Session.load(latest.name)
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    session = _load_session(args.id)
+    if session is None:
+        target = args.id or "latest"
+        render.say(f"{render.RED}no such session:{render.RESET} {target}")
+        return 1
+
+    text = markdown_report(session)
+    if args.output:
+        path = Path(args.output)
+        path.write_text(text)
+        render.say(f"wrote {render.CYAN}{path}{render.RESET}")
+    else:
+        render.out(text.rstrip())
+    return 0
+
+
+def register(subparsers) -> None:
+    parser = subparsers.add_parser("report", help="write a Markdown summary for a session")
+    parser.add_argument("id", nargs="?", help="session id (default: the most recent)")
+    parser.add_argument("-o", "--output", help="write the report to this path instead of stdout")
+    parser.set_defaults(func=cmd_report, needs_project=True)

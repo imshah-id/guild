@@ -36,6 +36,8 @@ $EDITOR .guild/context.md # tell the team what the project is and its rules
 guild status              # see the resolved setup at a glance
 guild run "Add the XP ledger reducer, pure TS, with tests" --plan-only   # preview the plan
 guild run "Add the XP ledger reducer, pure TS, with tests"               # let it build
+guild sessions            # list previous runs
+guild report              # print a Markdown report for the latest run
 guild monitor             # live dashboard, in a second pane
 guild resume              # a run stopped early? pick up where it left off
 ```
@@ -107,7 +109,7 @@ guild run "..." --reviewer agy --model codex=gpt-5.5 --effort high --gating chec
 ```
 guild/
   cli.py            arg parsing + dispatch
-  commands/         run, status, monitor, config, init, doctor, single
+  commands/         run, sessions, report, status, monitor, config, init, doctor, single
   config.py         layered config + project discovery
   roles.py          abstract roles, role->agent resolution, cross-review rule
   agents.py         agent adapters (claude/codex/agy), capability-aware, testable cmd builders
