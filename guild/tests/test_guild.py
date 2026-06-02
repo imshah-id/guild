@@ -19,7 +19,7 @@ from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from guild import (  # noqa: E402
-    agents, compaction, config, context, monitor, pipeline, planner, prompts, render, roles,
+    agents, compaction, config, context, home, monitor, pipeline, planner, prompts, render, roles,
     scorecard, state, validation,
 )
 from guild.commands import completion as completion_cmd  # noqa: E402
@@ -31,6 +31,7 @@ from guild.commands import resume as resume_cmd  # noqa: E402
 from guild.commands import run as run_cmd  # noqa: E402
 from guild.commands import sessions as sessions_cmd  # noqa: E402
 from guild.commands import status as status_cmd  # noqa: E402
+from guild import cli as cli_mod  # noqa: E402
 from guild.roles import READ_ONLY, WRITE, AgentSpec  # noqa: E402
 
 
@@ -356,6 +357,28 @@ class StatusSmokeTests(GuildTestBase):
         self.assertIn("roles -> agent", text)
         self.assertIn("gating", text)
         self.assertIn("not initialized", text)  # GUILD_DIR is None in this base
+
+
+class HomeInterfaceTests(GuildTestBase):
+    def test_home_lines_show_api_models_effort_and_usage(self) -> None:
+        config.SETTINGS["agents"]["codex"]["model"] = "gpt-5"
+        config.SETTINGS["agents"]["codex"]["effort"] = "high"
+
+        text = "\n".join(home.home_lines())
+
+        self.assertIn("API / CLI", text)
+        self.assertIn("selected models", text)
+        self.assertIn("effort", text)
+        self.assertIn("usage", text)
+        self.assertIn("gpt-5", text)
+        self.assertIn("high", text)
+
+    def test_bare_guild_opens_home_interface(self) -> None:
+        with mock.patch.object(home, "open_home") as opened:
+            rc = cli_mod.main([])
+
+        self.assertEqual(rc, 0)
+        opened.assert_called_once()
 
 
 # --- state round trip --------------------------------------------------------------------

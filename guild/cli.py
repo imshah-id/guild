@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 
-from . import __version__, config
+from . import __version__, config, home
 from .commands import (
     completion, config_cmd, doctor, init, monitor, plan, recovery, report, resume, run,
     scorecard_cmd, sessions, single, status,
@@ -56,8 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not getattr(args, "cmd", None):
-        parser.print_help()
-        return 0
     config.activate()  # discover the project (if any) and load merged settings
+    if not getattr(args, "cmd", None):
+        home.open_home()
+        return 0
     return int(args.func(args))

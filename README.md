@@ -32,6 +32,8 @@ pip install -e .          # editable, for hacking on guild itself
 ```
 
 This puts a `guild` command on your PATH. (No checkout? `python3 -m guild ...` works too.)
+Run `guild` with no subcommand to open the terminal interface; use `guild --help` for the command
+reference.
 
 Installer options:
 
@@ -49,6 +51,7 @@ cd your-project
 guild init                # writes .guild/ (context.md + config.json) into this repo
 #   guild init --analyze  # have the planner scan the repo and draft context.md for you
 $EDITOR .guild/context.md # tell the team what the project is and its rules
+guild                     # open the terminal interface
 guild status              # see the resolved setup at a glance
 guild run "Add the XP ledger reducer, pure TS, with tests" --plan-only   # preview the plan
 guild plan                # inspect or edit that saved plan
@@ -142,10 +145,12 @@ Completion scripts include top-level commands plus common subcommand flags such 
 
 ## Terminal UI
 
-Foreground runs use compact banners, phase chips, status marks, and progress bars so plans and
-review/fix loops are easy to scan without adding dependencies. `guild monitor` keeps the live
-curses dashboard, while `guild monitor --plain` and `guild monitor --json` provide script-friendly
-snapshots.
+Run `guild` by itself to open the home interface. The top section shows the project, gating mode,
+latest session, configured agent APIs/CLIs, selected models, effort levels, access mode, CLI
+availability, and usage seen in the local scorecard. Foreground runs use compact banners, phase
+chips, status marks, and progress bars so plans and review/fix loops are easy to scan without
+adding dependencies. `guild monitor` keeps the live curses dashboard, while `guild monitor --plain`
+and `guild monitor --json` provide script-friendly snapshots.
 
 ## Project layout it creates
 
