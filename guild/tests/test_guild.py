@@ -412,6 +412,13 @@ class HomeInterfaceTests(GuildTestBase):
         self.assertIn("> status", text)
         self.assertIn("enter run", text)
 
+    def test_home_dashboard_shows_command_recommendation(self) -> None:
+        text = "\n".join(home.dashboard_lines(90, home.HomeState(command="sta")))
+
+        self.assertIn("> sta", text)
+        self.assertIn("suggestion", text)
+        self.assertIn("status", text)
+
     def test_home_dashboard_renders_help_rows(self) -> None:
         ui = home.HomeState(transcript=home.help_lines())
 
@@ -451,6 +458,25 @@ class HomeInterfaceTests(GuildTestBase):
         home._complete_command(ui)
 
         self.assertEqual(ui.command, "/status ")
+
+    def test_home_tab_completion_handles_plain_command_prefix(self) -> None:
+        ui = home.HomeState(command="sta")
+        home._complete_command(ui)
+
+        self.assertEqual(ui.command, "status ")
+
+    def test_home_enter_runs_unique_command_recommendation(self) -> None:
+        ui = home.HomeState(command="sta")
+
+        with mock.patch.object(home, "run_embedded_command", return_value=(["ok"], 0)) as run:
+            home._execute_typed(ui)
+
+        run.assert_called_once_with("status")
+        self.assertEqual(ui.transcript, ["ok"])
+
+    def test_home_recommendation_preserves_arguments(self) -> None:
+        self.assertEqual(home._expand_command("repo --json"), "report --json")
+        self.assertEqual(home._expand_command("/sta"), "/status")
 
     def test_home_execute_clear_and_quit_actions(self) -> None:
         ui = home.HomeState(command="/clear", transcript=["old output"])

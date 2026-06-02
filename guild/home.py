@@ -342,12 +342,18 @@ def _output_section(ui: HomeState, width: int) -> list[str]:
 
 
 def _input_section(ui: HomeState, width: int) -> list[str]:
-    return [
+    suggestion = _suggestion_text(ui.command)
+    lines = [
         _box_top("Command input", width),
         _row("> " + ui.command, width),
+    ]
+    if suggestion:
+        lines.append(_row(suggestion, width))
+    lines.extend([
         _box_bottom(width),
         f"  /help commands   {_DOT}   enter run   {_DOT}   tab complete   {_DOT}   /quit exit",
-    ]
+    ])
+    return lines
 
 
 def dashboard_lines(width: int = DEFAULT_WIDTH, ui: HomeState | None = None) -> list[str]:
@@ -471,6 +477,8 @@ def _line_attr(line: str, row: int, use_color: bool) -> int:
             return _pair(1, use_color)
         if body.startswith(">"):
             return curses.A_BOLD | _pair(2, use_color)
+        if body.startswith(("suggestion", "matches")):
+            return _pair(3, use_color)
         if body.startswith("/"):
             return _pair(2, use_color)
         return 0
@@ -499,15 +507,12 @@ def _normalize_command(raw: str) -> list[str]:
 
 
 def _complete_command(ui: HomeState) -> None:
-    from . import cli
-
-    commands = sorted([*_registered_commands(cli.build_parser()), *_SLASH_COMMANDS])
     current = ui.command.strip()
-    if " " in current:
-        return
-    matches = [command for command in commands if command.startswith(current)]
+    matches = _command_matches(current)
     if len(matches) == 1:
-        ui.command = matches[0] + " "
+        ui.command = _replace_first_command(current, matches[0])
+        if not ui.command.endswith(" "):
+            ui.command += " "
     elif matches:
         assert ui.transcript is not None
         ui.transcript = [f"completions: {', '.join(matches)}"]
@@ -522,8 +527,64 @@ def _registered_commands(parser) -> set[str]:
     return commands
 
 
+def _command_choices(prefix: str) -> list[str]:
+    if prefix.startswith("/"):
+        return sorted(_SLASH_COMMANDS)
+    from . import cli
+
+    return sorted(_registered_commands(cli.build_parser()))
+
+
+def _split_command_prefix(raw: str) -> tuple[str, str, str]:
+    text = raw.strip()
+    if not text:
+        return "", "", ""
+    leader = ""
+    if text == "guild":
+        return "", "", "guild "
+    if text.startswith("guild "):
+        leader = "guild "
+        text = text[6:].lstrip()
+    if not text:
+        return "", "", leader
+    first, _, rest = text.partition(" ")
+    return first, rest, leader
+
+
+def _command_matches(raw: str) -> list[str]:
+    prefix, _rest, _leader = _split_command_prefix(raw)
+    if not prefix:
+        return []
+    choices = _command_choices(prefix)
+    if prefix in choices:
+        return []
+    return [command for command in choices if command.startswith(prefix)]
+
+
+def _replace_first_command(raw: str, command: str) -> str:
+    _prefix, rest, leader = _split_command_prefix(raw)
+    return f"{leader}{command}" + (f" {rest}" if rest else "")
+
+
+def _expand_command(raw: str) -> str:
+    matches = _command_matches(raw)
+    if len(matches) == 1:
+        return _replace_first_command(raw, matches[0])
+    return raw.strip()
+
+
+def _suggestion_text(raw: str) -> str:
+    matches = _command_matches(raw)
+    if not matches:
+        return ""
+    if len(matches) == 1:
+        expanded = _replace_first_command(raw.strip(), matches[0])
+        return f"suggestion  {expanded}  (enter run, tab complete)"
+    return "matches     " + ", ".join(matches[:6])
+
+
 def _execute_typed(ui: HomeState) -> None:
-    command = ui.command.strip()
+    command = _expand_command(ui.command)
     ui.command = ""
     parts = _normalize_command(command)
     if parts and parts[0] == "quit":
@@ -538,6 +599,7 @@ def _execute_typed(ui: HomeState) -> None:
 
 
 def run_embedded_command(command: str) -> tuple[list[str], int]:
+    command = _expand_command(command)
     parts = _normalize_command(command)
     if not parts:
         return ["No command entered."], 0
