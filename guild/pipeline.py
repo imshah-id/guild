@@ -90,6 +90,15 @@ class Pipeline:
 
     # --- task assembly ----------------------------------------------------------------
 
+    def _restore_notes(self) -> None:
+        """On resume, rebuild the scout's running findings from research steps that already
+        completed, so later implement steps still receive the prior context they did first time."""
+        for step in self.s.steps:
+            if step.phase == RESEARCH and step.status == DONE and step.summary:
+                self.notes.append(
+                    f"[{step.title}] {_first_paragraph(step.summary, config.RESEARCH_NOTE_CHARS)}"
+                )
+
     def _task_with_notes(self, step: Step) -> str:
         if not self.notes:
             return step.task
@@ -122,9 +131,11 @@ class Pipeline:
 
     # --- the run loop -----------------------------------------------------------------
 
-    def run(self) -> None:
+    def run(self, *, resume: bool = False) -> None:
         self._print_plan()
-        if self.s.gating in ("guided", "checkpoint"):
+        if resume:
+            self._restore_notes()
+        elif self.s.gating in ("guided", "checkpoint"):
             if self.gate("Approve this plan?", ["approve", "abort"]) != "approve":
                 self._abort("aborted at plan gate")
                 return
@@ -147,6 +158,8 @@ class Pipeline:
                 result_ok = self._do_implement(step)
                 if result_ok:
                     self._review(step, index)
+            elif step.phase == REVIEW:
+                self._rerun_review(step)  # an interrupted review, picked up on resume
             elif step.phase == TEST:
                 self._do_test(step, index)
 
@@ -216,7 +229,6 @@ class Pipeline:
         return result.ok
 
     def _review(self, impl_step: Step, index: int) -> None:
-        spec = roles.reviewer_spec(impl_step.agent)
         review = Step(
             id=f"{impl_step.id}-review",
             phase=REVIEW,
@@ -224,6 +236,21 @@ class Pipeline:
             attempts=impl_step.attempts,
         )
         self.s.steps.insert(index + 1, review)
+        self._run_review(impl_step, review)
+
+    def _rerun_review(self, review: Step) -> None:
+        """Resume entry point: a review step the loop reached that never finished. Re-drive it
+        against its implement step (the review id is `<impl id>-review`)."""
+        parent_id = review.id[: -len("-review")] if review.id.endswith("-review") else ""
+        impl_step = next((s for s in self.s.steps if s.id == parent_id), None)
+        if impl_step is None:
+            review.status = SKIPPED
+            self._save()
+            return
+        self._run_review(impl_step, review)
+
+    def _run_review(self, impl_step: Step, review: Step) -> None:
+        spec = roles.reviewer_spec(impl_step.agent)
         self._begin(review, spec.name)
         with render.Spinner(f"{spec.name} reviewing: {impl_step.title}"):
             result = agents.run(
@@ -255,7 +282,7 @@ class Pipeline:
             task=self._fix_task(impl_step, result.text),
             attempts=impl_step.attempts + 1,
         )
-        self.s.steps.insert(index + 2, fix)
+        self.s.steps.insert(self.s.steps.index(review) + 1, fix)
         self._save()
 
     def _do_test(self, step: Step, index: int) -> None:

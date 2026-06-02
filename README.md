@@ -37,7 +37,13 @@ guild status              # see the resolved setup at a glance
 guild run "Add the XP ledger reducer, pure TS, with tests" --plan-only   # preview the plan
 guild run "Add the XP ledger reducer, pure TS, with tests"               # let it build
 guild monitor             # live dashboard, in a second pane
+guild resume              # a run stopped early? pick up where it left off
 ```
+
+A run that stops short — a timeout, Ctrl-C, a sleeping laptop, or an abort at a gate — leaves its
+progress in `state.json`. `guild resume` (or `guild resume <id>` for a specific session) reloads
+it and re-enters the pipeline, skipping the steps that already finished; a step caught mid-flight
+re-runs from scratch, and anything you already approved isn't re-asked.
 
 ## The team
 

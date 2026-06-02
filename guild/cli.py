@@ -3,6 +3,7 @@
   guild init [--analyze]              bootstrap .guild/ for the current project
   guild status                        resolved roles, agents, gating, latest session
   guild run "<goal>"                  autonomous: plan, build, cross-review, test, report
+  guild resume [id]                   continue an interrupted session where it stopped
   guild monitor [id]                  live dashboard for a session
   guild config set roles.reviewer codex      toggle any setting
   guild research|implement|test|review "<task>" [paths...]   single-agent one-offs
@@ -13,7 +14,7 @@ from __future__ import annotations
 import argparse
 
 from . import __version__, config
-from .commands import config_cmd, doctor, init, monitor, run, single, status
+from .commands import config_cmd, doctor, init, monitor, resume, run, single, status
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.register(sub)
     status.register(sub)
     run.register(sub)
+    resume.register(sub)
     monitor.register(sub)
     config_cmd.register(sub)
     single.register(sub)

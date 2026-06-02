@@ -287,6 +287,41 @@ class StateRoundTripTests(GuildTestBase):
         self.assertEqual(len(data["steps"]), 1)
         self.assertEqual(data["steps"][0]["phase"], "implement")
 
+    def test_session_load_reconstructs_dataclasses(self) -> None:
+        session = state.Session.new("ship it", "checkpoint")
+        session.status = "running"
+        session.steps = [
+            state.Step(id="01-implement", phase="implement", title="build", status=state.DONE),
+            state.Step(id="02-test", phase="test", title="verify", task="run tests"),
+        ]
+        session.save()
+
+        loaded = state.Session.load(session.id)
+        assert loaded is not None
+        self.assertEqual(loaded.goal, "ship it")
+        self.assertEqual(loaded.gating, "checkpoint")
+        self.assertEqual(loaded.status, "running")
+        self.assertEqual([s.id for s in loaded.steps], ["01-implement", "02-test"])
+        self.assertIsInstance(loaded.steps[0], state.Step)
+        self.assertEqual(loaded.steps[0].status, state.DONE)
+        self.assertEqual(loaded.steps[1].task, "run tests")
+
+    def test_session_load_missing_returns_none(self) -> None:
+        self.assertIsNone(state.Session.load("nope-does-not-exist"))
+
+    def test_session_load_ignores_unknown_keys(self) -> None:
+        session = state.Session.new("x", "guided")
+        session.save()
+        raw = json.loads(session.state_path().read_text())
+        raw["from_a_newer_version"] = True
+        raw["steps"] = [{"id": "01-implement", "phase": "implement", "title": "t", "future_field": 1}]
+        session.state_path().write_text(json.dumps(raw))
+
+        loaded = state.Session.load(session.id)
+        assert loaded is not None
+        self.assertEqual(loaded.steps[0].id, "01-implement")
+        self.assertFalse(hasattr(loaded, "from_a_newer_version"))
+
 
 # --- pipeline engine (mocked agents) -----------------------------------------------------
 
@@ -338,6 +373,65 @@ class PipelineEngineTests(GuildTestBase):
         session.steps = [state.Step(id="01-implement", phase="implement", title="x", task="y")]
         pipeline.Pipeline(session, lambda prompt, options: "abort").run()
         self.assertEqual(session.status, "aborted")
+
+    def test_resume_skips_done_steps_and_runs_the_rest(self) -> None:
+        session = state.Session.new("build a thing", "guided")
+        session.steps = [
+            state.Step(id="01-implement", phase="implement", title="already built",
+                       task="t1", status=state.DONE, agent="codex"),
+            state.Step(id="02-implement", phase="implement", title="still to build", task="t2"),
+        ]
+
+        implemented: list[str] = []
+
+        def fake_run(spec, capability, prompt, run_dir, *, timeout):
+            if capability == WRITE:
+                implemented.append(prompt)
+                return _fake_result(str(run_dir), "changed src/foo.ts")
+            return _fake_result(str(run_dir), "APPROVE")
+
+        def gate(prompt, options):
+            # On resume the plan gate must not fire (the plan was already approved).
+            self.assertNotIn("Approve this plan?", prompt)
+            return options[0]
+
+        with mock.patch.object(agents, "run", fake_run):
+            pipeline.Pipeline(session, gate).run(resume=True)
+
+        self.assertEqual(session.status, "done")
+        # Only the not-yet-done step (task t2) was implemented; the done one was skipped.
+        self.assertEqual(len(implemented), 1, implemented)
+        self.assertIn("t2", implemented[0])
+        self.assertNotIn("t1", implemented[0])
+        # The skipped-over implement still has no review; the resumed one got one.
+        self.assertTrue(any(s.id == "02-implement-review" for s in session.steps))
+        self.assertFalse(any(s.id == "01-implement-review" for s in session.steps))
+
+    def test_resume_redrives_an_interrupted_review(self) -> None:
+        # A run that died mid-review: the implement is done, its review was left running.
+        session = state.Session.new("x", "hands-off")
+        session.steps = [
+            state.Step(id="01-implement", phase="implement", title="built",
+                       task="t", status=state.DONE, agent="codex"),
+            state.Step(id="01-implement-review", phase="review", title="review: built",
+                       status=state.PENDING),
+        ]
+
+        reviewed: list[str] = []
+
+        def fake_run(spec, capability, prompt, run_dir, *, timeout):
+            reviewed.append(spec.name)
+            return _fake_result(str(run_dir), "APPROVE")
+
+        with mock.patch.object(agents, "run", fake_run):
+            pipeline.Pipeline(session, lambda p, o: o[0]).run(resume=True)
+
+        self.assertEqual(session.status, "done")
+        self.assertEqual(len(reviewed), 1, reviewed)        # the review re-ran, exactly once
+        self.assertNotEqual(reviewed[0], "codex")           # and stayed independent of the author
+        review = next(s for s in session.steps if s.phase == "review")
+        self.assertEqual(review.status, state.DONE)
+        self.assertEqual(review.verdict, "APPROVE")
 
 
 if __name__ == "__main__":

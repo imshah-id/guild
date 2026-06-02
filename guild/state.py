@@ -9,7 +9,7 @@ import json
 import os
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from . import config
@@ -84,6 +84,29 @@ class Session:
     def new(goal: str, gating: str) -> "Session":
         stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         return Session(id=f"{stamp}-{uuid.uuid4().hex[:6]}", goal=goal, gating=gating)
+
+    @staticmethod
+    def load(session_id: str) -> "Session | None":
+        """Reconstruct a Session (and its Steps) from <runs>/<id>/state.json, or None if the
+        session does not exist or its state file cannot be read. Unknown keys are ignored so an
+        older on-disk state still loads as the schema grows."""
+        data = load_dict(config.RUNS_DIR / session_id / "state.json")
+        if data is None:
+            return None
+        steps = [
+            Step(**_only_fields(Step, raw))
+            for raw in data.get("steps", [])
+            if isinstance(raw, dict)
+        ]
+        session = Session(**_only_fields(Session, data, exclude={"steps"}))
+        session.steps = steps
+        return session
+
+
+def _only_fields(cls, data: dict, exclude: set[str] = frozenset()) -> dict:
+    """Keep only keys that are real constructor fields of `cls`, dropping anything else."""
+    names = {f.name for f in fields(cls)} - set(exclude)
+    return {k: v for k, v in data.items() if k in names}
 
 
 def load_dict(state_path: Path) -> dict | None:
