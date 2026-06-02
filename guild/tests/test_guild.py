@@ -630,6 +630,16 @@ class HomeInterfaceTests(GuildTestBase):
         self.assertEqual(home._normalize_command("/report --open"), ["report", "--open"])
         self.assertEqual(home._normalize_command("/agents"), ["agents-view"])
         self.assertEqual(home._normalize_command("/quite"), ["quit"])
+        self.assertEqual(home._normalize_command("/roles"), ["roles"])
+        self.assertEqual(home._normalize_command("/roles set reviewer codex"),
+                         ["roles", "set", "reviewer", "codex"])
+
+    def test_home_slash_roles_runs_embedded(self) -> None:
+        lines, rc = home.run_embedded_command("/roles")
+        self.assertEqual(rc, 0)
+        text = "\n".join(lines)  # output is tail-truncated to the last lines
+        self.assertIn("reviewer", text)
+        self.assertIn("agents:", text)
 
     def test_home_embedded_command_blocks_interactive_flows(self) -> None:
         lines, rc = home.run_embedded_command('run "ship it"')
