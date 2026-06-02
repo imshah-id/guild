@@ -46,6 +46,9 @@ class Step:
     attempts: int = 0
     needs_human: bool = False
     human_reason: str = ""
+    parallel_group: str = ""
+    changed_files: list[str] = field(default_factory=list)
+    diff_stat: str = ""
     started: float = 0.0
     ended: float = 0.0
     returncode: int | None = None

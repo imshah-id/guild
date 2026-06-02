@@ -58,6 +58,7 @@ def make_plan(session: state.Session) -> list[state.Step]:
                 task=str(raw.get("task", "")).strip(),
                 needs_human=bool(raw.get("needs_human", False)),
                 human_reason=str(raw.get("human_reason", "")).strip(),
+                parallel_group=str(raw.get("parallel_group", "")).strip(),
             )
         )
     if not steps:

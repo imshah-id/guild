@@ -54,6 +54,29 @@ DEFAULTS: dict = {
         "planner_timeout": 600,
         "research_timeout": 600,
     },
+    "profiles": {
+        "fast": {
+            "gating": "hands-off",
+            "limits": {"max_fix_attempts": 1, "research_timeout": 300},
+            "agents": {
+                "claude": {"effort": "low"},
+                "codex": {"effort": "low"},
+            },
+        },
+        "careful": {
+            "gating": "guided",
+            "limits": {"max_fix_attempts": 4, "step_timeout": 2400},
+            "agents": {
+                "claude": {"effort": "high"},
+                "codex": {"effort": "high"},
+            },
+        },
+        "review-heavy": {
+            "gating": "checkpoint",
+            "limits": {"max_fix_attempts": 4},
+            "compaction": {"review_chars": 3000},
+        },
+    },
 }
 
 
@@ -209,6 +232,20 @@ def apply_overrides(overrides: dict) -> None:
     for dotted, value in overrides.items():
         _set_nested(SETTINGS, dotted, value)
     _refresh_constants()
+
+
+def apply_profile(name: str) -> str | None:
+    """Layer a named profile onto SETTINGS. Returns an error string if it does not exist."""
+    profile = setting(f"profiles.{name}", _MISSING)
+    if not isinstance(profile, dict):
+        available = ", ".join(sorted((setting("profiles", {}) or {}).keys()))
+        return f"unknown profile '{name}'" + (f" (have: {available})" if available else "")
+    sources: dict = {}
+    merged = _deep_merge(SETTINGS, profile, f"profile:{name}", sources)
+    SETTINGS.clear()
+    SETTINGS.update(merged)
+    _refresh_constants()
+    return None
 
 
 def parse_value(raw: str):
