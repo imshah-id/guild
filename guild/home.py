@@ -10,8 +10,38 @@ import curses
 import shutil
 import sys
 import time
+from dataclasses import dataclass
 
 from . import __version__, config, render, roles, scorecard, state
+
+DEFAULT_WIDTH = 108
+
+
+@dataclass(frozen=True)
+class AgentRow:
+    agent: str
+    adapter: str
+    assigned_roles: str
+    model: str
+    effort: str
+    access: str
+    status: str
+    usage: str
+
+
+def _clip(text: object, width: int) -> str:
+    value = str(text)
+    if width <= 0:
+        return ""
+    if len(value) <= width:
+        return value
+    if width <= 3:
+        return value[:width]
+    return value[:width - 3] + "..."
+
+
+def _pad(text: object, width: int) -> str:
+    return _clip(text, width).ljust(width)
 
 
 def _agent_usage(data: dict, agent: str) -> str:
@@ -25,65 +55,179 @@ def _agent_usage(data: dict, agent: str) -> str:
     return f"{ok}/{total} ok, {failed} fail, avg {avg}s"
 
 
-def _latest_summary() -> str:
+def _latest_data() -> dict:
     latest = state.latest_session_dir()
     if latest is None:
+        return {}
+    return state.load_dict(latest / "state.json") or {"id": latest.name}
+
+
+def _latest_summary() -> str:
+    data = _latest_data()
+    if not data:
         return "none"
-    data = state.load_dict(latest / "state.json") or {}
     steps = data.get("steps", [])
     done = sum(1 for step in steps if step.get("status") in (state.DONE, state.SKIPPED))
     status = data.get("status", "unknown")
-    return f"{data.get('id', latest.name)}  {status}  {done}/{len(steps)} steps"
+    return f"{data.get('id', '')}  {status}  {done}/{len(steps)} steps"
 
 
-def model_rows() -> list[str]:
-    """Rows for the API/model/effort/usage section."""
+def agent_rows() -> list[AgentRow]:
+    """Structured rows for the API/model/effort/usage section."""
     usage = scorecard.load()
-    rows: list[str] = []
-    for role in roles.ROLES:
+    rows: list[AgentRow] = []
+    for agent in roles.agent_names():
         try:
-            agent = roles.agent_for_role(role)
             spec = roles.spec_for_agent(agent)
-            cap = roles.capability_for(role)
-            available = "available" if shutil.which(spec.bin) else "missing"
+            assigned: list[str] = []
+            caps: set[str] = set()
+            for role in roles.ROLES:
+                try:
+                    if roles.agent_for_role(role) == agent:
+                        assigned.append(role)
+                        caps.add(roles.capability_for(role))
+                except roles.RoleError:
+                    continue
             model = spec.model or "default"
             effort = spec.effort or "default"
-            rows.append(
-                f"  {role:12} {agent:10} {spec.adapter:9} {model:14} "
-                f"{effort:8} {cap:10} {available:9} {_agent_usage(usage, agent)}"
-            )
+            rows.append(AgentRow(
+                agent=agent,
+                adapter=spec.adapter,
+                assigned_roles=", ".join(assigned) if assigned else "-",
+                model=model,
+                effort=effort,
+                access="/".join(sorted(caps)) if caps else "-",
+                status="available" if shutil.which(spec.bin) else "missing",
+                usage=_agent_usage(usage, agent),
+            ))
         except roles.RoleError as exc:
-            rows.append(f"  {role:12} {render.RED}{exc}{render.RESET}")
+            rows.append(AgentRow(
+                agent=agent,
+                adapter="bad",
+                assigned_roles="-",
+                model="-",
+                effort="-",
+                access="-",
+                status="error",
+                usage=str(exc),
+            ))
     return rows
 
 
-def home_lines() -> list[str]:
-    project = str(config.PROJECT_ROOT) if config.GUILD_DIR is not None else "not initialized here"
-    context = "ok" if (config.CONTEXT_PATH and config.CONTEXT_PATH.exists()) else "missing"
-    comp = config.setting("compaction", {}) or {}
-    lines = [
-        render.banner("guild", ("interface", "home"), ("version", __version__)),
-        render.kv("project", project),
-        render.kv("context", f"{config.PROJECT_DIRNAME}/context.md {context}" if config.GUILD_DIR else "run `guild init`"),
-        render.kv("gating", config.setting("gating", config.DEFAULT_GATING)),
-        render.kv("compaction", "on" if comp.get("enabled") else "off"),
-        render.kv("latest", _latest_summary()),
-        "",
-        render.section("API / CLI, selected models, effort, usage"),
-        "  role         agent      api/cli   model          effort   access     status    usage",
-        *model_rows(),
-        "",
-        render.section("commands"),
-        "  run <goal>        plan, build, cross-review, test",
-        "  monitor           live dashboard for latest session",
-        "  sessions          previous runs",
-        "  report --open     write and open latest report",
-        "  config profiles   available model/effort profiles",
-        "  doctor --live     check configured agent CLIs",
-        "",
-        render.kv("keys", "q quit, r refresh"),
+def model_rows() -> list[str]:
+    """Rows for tests and plain output compatibility."""
+    return [
+        f"  {row.agent:10} {row.adapter:9} {row.assigned_roles:28} {row.model:14} "
+        f"{row.effort:8} {row.access:11} {row.status:9} {row.usage}"
+        for row in agent_rows()
     ]
+
+
+def _hr(width: int) -> str:
+    return "+" + "-" * max(width - 2, 0) + "+"
+
+
+def _box(title: str, body: list[str], width: int) -> list[str]:
+    width = max(width, 48)
+    label = f" {title} "
+    top = "+" + label + "-" * max(width - len(label) - 2, 0) + "+"
+    inner = width - 4
+    lines = [top]
+    for line in body:
+        lines.append(f"| {_pad(line, inner)} |")
+    lines.append(_hr(width))
     return lines
+
+
+def _pair_line(left_label: str, left_value: object, right_label: str, right_value: object,
+               width: int) -> str:
+    half = max((width - 3) // 2, 20)
+    left = f"{left_label}: {left_value}"
+    right = f"{right_label}: {right_value}"
+    return f"{_pad(left, half)} | {_pad(right, width - half - 3)}"
+
+
+def _overview_body(width: int) -> list[str]:
+    initialized = config.GUILD_DIR is not None
+    project = str(config.PROJECT_ROOT) if initialized else "not initialized here"
+    context = "ok" if (config.CONTEXT_PATH and config.CONTEXT_PATH.exists()) else "missing"
+    context_value = f"{config.PROJECT_DIRNAME}/context.md {context}" if initialized else "run `guild init`"
+    comp = config.setting("compaction", {}) or {}
+    inner = width - 4
+    return [
+        _pair_line("Project", project, "Context", context_value, inner),
+        _pair_line("Gating", config.setting("gating", config.DEFAULT_GATING),
+                   "Compaction", "on" if comp.get("enabled") else "off", inner),
+        _pair_line("Latest", _latest_summary(), "Config", "guild config list", inner),
+    ]
+
+
+def _api_body(width: int) -> list[str]:
+    inner = width - 4
+    fixed = 10 + 2 + 22 + 2 + 15 + 2 + 8 + 2 + 11 + 2 + 9 + 2
+    usage_width = max(inner - fixed, 12)
+    rows = [
+        f"{_pad('API/CLI', 10)}  {_pad('Roles', 22)}  {_pad('Selected model', 15)}  "
+        f"{_pad('Effort', 8)}  {_pad('Access', 11)}  {_pad('Status', 9)}  {_pad('Usage', usage_width)}",
+        "-" * inner,
+    ]
+    for row in agent_rows():
+        rows.append(
+            f"{_pad(row.agent, 10)}  {_pad(row.assigned_roles, 22)}  {_pad(row.model, 15)}  "
+            f"{_pad(row.effort, 8)}  {_pad(row.access, 11)}  {_pad(row.status, 9)}  {_pad(row.usage, usage_width)}"
+        )
+    return rows
+
+
+def _latest_body(width: int) -> list[str]:
+    data = _latest_data()
+    if not data:
+        return [
+            "No sessions yet.",
+            "Start one with: guild run \"<goal>\"",
+        ]
+    steps = data.get("steps", [])
+    done = sum(1 for step in steps if step.get("status") in (state.DONE, state.SKIPPED))
+    goal = str(data.get("goal", ""))
+    return [
+        f"Session: {data.get('id', '')}",
+        f"Status:  {data.get('status', 'unknown')}    Progress: {render.progress(done, len(steps), width=14)}",
+        f"Goal:    {goal}",
+        "Open:    guild monitor    guild report --open",
+    ]
+
+
+def _actions_body() -> list[str]:
+    return [
+        "guild run \"<goal>\"       Plan, build, review, test",
+        "guild monitor            Live dashboard for latest session",
+        "guild sessions           Browse previous runs",
+        "guild report --open      Open latest Markdown report",
+        "guild config profiles    Show model/effort presets",
+        "guild doctor --live      Check agent CLIs",
+    ]
+
+
+def dashboard_lines(width: int = DEFAULT_WIDTH) -> list[str]:
+    width = max(width, 72)
+    header_inner = width - 4
+    title = f"guild {__version__}"
+    subtitle = "agent team terminal"
+    lines = [
+        _hr(width),
+        f"| {_pad(title, 18)} {_pad(subtitle, header_inner - 19)} |",
+        _hr(width),
+    ]
+    lines.extend(_box("Overview", _overview_body(width), width))
+    lines.extend(_box("API / CLI / selected models / effort / availability / usage", _api_body(width), width))
+    lines.extend(_box("Latest Session", _latest_body(width), width))
+    lines.extend(_box("Quick Actions", _actions_body(), width))
+    lines.append("Keys: q quit, r refresh")
+    return lines
+
+
+def home_lines() -> list[str]:
+    return dashboard_lines(DEFAULT_WIDTH)
 
 
 def open_home() -> None:
@@ -118,51 +262,17 @@ def _loop(stdscr: "curses.window") -> None:
 def _draw(stdscr: "curses.window", use_color: bool) -> None:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
-    w = max(width - 1, 20)
-
-    title_attr = curses.A_BOLD | (curses.color_pair(2) if use_color else 0)
-    stdscr.addnstr(0, 0, " guild ", w, title_attr)
-    stdscr.addnstr(0, 8, "agent team interface", max(w - 8, 1), curses.A_DIM)
-    stdscr.addnstr(1, 0, f" project: {config.PROJECT_ROOT if config.GUILD_DIR else 'not initialized here'}", w)
-    stdscr.addnstr(
-        2, 0,
-        f" gating: {config.setting('gating', config.DEFAULT_GATING)}   latest: {_latest_summary()}",
-        w,
-        curses.A_DIM,
-    )
-
-    row = 4
-    stdscr.addnstr(row, 0, " API / CLI, selected models, effort, usage ", w, curses.A_BOLD)
-    row += 1
-    stdscr.addnstr(row, 0, " role         agent      api/cli   model          effort   access     status    usage", w, curses.A_DIM)
-    row += 1
-    for line in model_rows():
-        if row >= height - 8:
-            break
+    w = max(width - 1, 72)
+    lines = dashboard_lines(w)
+    for row, line in enumerate(lines[:max(height - 1, 0)]):
         attr = 0
+        if row in (0, 1, 2) or line.startswith("+") and line.endswith("+"):
+            attr = curses.A_BOLD
         if " missing " in line and use_color:
-            attr = curses.color_pair(4)
+            attr |= curses.color_pair(4)
         elif " available " in line and use_color:
-            attr = curses.color_pair(1)
-        stdscr.addnstr(row, 0, line, w, attr)
-        row += 1
-
-    row += 1
-    if row < height - 2:
-        stdscr.addnstr(row, 0, " Commands ", w, curses.A_BOLD)
-        commands = [
-            "run <goal>      plan/build/review/test",
-            "monitor         live session dashboard",
-            "sessions        previous runs",
-            "report --open   open latest Markdown report",
-            "config profiles model/effort presets",
-        ]
-        for command in commands:
-            row += 1
-            if row >= height - 2:
-                break
-            stdscr.addnstr(row, 0, " " + command, w)
-
+            attr |= curses.color_pair(1)
+        stdscr.addnstr(row, 0, line, width - 1, attr)
     footer = f" q quit   r refresh   {time.strftime('%H:%M:%S')}"
-    stdscr.addnstr(height - 1, 0, footer.ljust(w), w, curses.A_REVERSE)
+    stdscr.addnstr(height - 1, 0, footer.ljust(width - 1), width - 1, curses.A_REVERSE)
     stdscr.refresh()
