@@ -412,6 +412,14 @@ class HomeInterfaceTests(GuildTestBase):
         self.assertIn("> status", text)
         self.assertIn("enter run", text)
 
+    def test_home_dashboard_renders_help_rows(self) -> None:
+        ui = home.HomeState(transcript=home.help_lines())
+
+        text = "\n".join(home.dashboard_lines(100, ui))
+
+        self.assertIn("/status      show resolved setup", text)
+        self.assertIn("/quite       exit the home interface", text)
+
     def test_home_embedded_command_normalizes_guild_prefix(self) -> None:
         self.assertEqual(home._normalize_command("guild status"), ["status"])
         self.assertEqual(home._normalize_command("?"), ["help"])
@@ -429,7 +437,10 @@ class HomeInterfaceTests(GuildTestBase):
     def test_home_slash_help_and_unknown_command(self) -> None:
         lines, rc = home.run_embedded_command("/help")
         self.assertEqual(rc, 0)
-        self.assertIn("/status", "\n".join(lines))
+        self.assertIn("Slash commands", lines)
+        self.assertIn("/status      show resolved setup", lines)
+        self.assertIn("/quit        exit the home interface", lines)
+        self.assertFalse(any("," in line and "/sessions" in line for line in lines))
 
         lines, rc = home.run_embedded_command("/wat")
         self.assertEqual(rc, 1)

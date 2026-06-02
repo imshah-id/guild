@@ -139,6 +139,23 @@ def agent_detail_lines() -> list[str]:
     return lines
 
 
+def help_lines() -> list[str]:
+    return [
+        "Slash commands",
+        "/status      show resolved setup",
+        "/sessions    browse previous runs",
+        "/timeline    show latest run events",
+        "/agents      inspect agent usage detail",
+        "/report      print latest Markdown report",
+        "/profiles    list model and effort presets",
+        "/doctor      check agent CLIs and config",
+        "/scorecard   show per-agent outcomes",
+        "/clear       clear command output",
+        "/quit        exit the home interface",
+        "/quite       exit the home interface",
+    ]
+
+
 def _latest_data() -> dict:
     latest = state.latest_session_dir()
     if latest is None:
@@ -312,14 +329,14 @@ def _agents_section(width: int) -> list[str]:
 def _transcript_body(ui: HomeState) -> list[str]:
     assert ui.transcript is not None
     if ui.transcript:
-        return ui.transcript[-6:]
+        return ui.transcript[-12:]
     return [ui.message]
 
 
 def _output_section(ui: HomeState, width: int) -> list[str]:
     return [
         _box_top("Command output", width),
-        *[_row(line, width) for line in _transcript_body(ui)[-4:]],
+        *[_row(line, width) for line in _transcript_body(ui)],
         _box_bottom(width),
     ]
 
@@ -529,13 +546,9 @@ def run_embedded_command(command: str) -> tuple[list[str], int]:
     if parts[0] == "clear":
         return [], 0
     if parts[0] in ("quit", "exit"):
-        return ["Press q to quit the home interface."], 0
+        return ["Use /quit to exit the home interface."], 0
     if parts[0] == "help":
-        return [
-            "Slash commands: /status, /sessions, /timeline, /agents, /report --open, /profiles, /doctor, /scorecard, /clear, /quit or /quite",
-            "You can also type normal guild commands without the leading `guild`.",
-            "Interactive flows like run/resume/monitor should be launched outside this screen.",
-        ], 0
+        return help_lines(), 0
     if parts[0] == "agents-view":
         return agent_detail_lines(), 0
     if parts[0] in _EMBEDDED_BLOCKED:
