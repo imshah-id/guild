@@ -11,7 +11,7 @@ import shutil
 import sys
 import time
 
-from . import config, render, roles, scorecard, state
+from . import __version__, config, render, roles, scorecard, state
 
 
 def _agent_usage(data: dict, agent: str) -> str:
@@ -62,7 +62,7 @@ def home_lines() -> list[str]:
     context = "ok" if (config.CONTEXT_PATH and config.CONTEXT_PATH.exists()) else "missing"
     comp = config.setting("compaction", {}) or {}
     lines = [
-        render.banner("guild", ("interface", "home"), ("version", "local")),
+        render.banner("guild", ("interface", "home"), ("version", __version__)),
         render.kv("project", project),
         render.kv("context", f"{config.PROJECT_DIRNAME}/context.md {context}" if config.GUILD_DIR else "run `guild init`"),
         render.kv("gating", config.setting("gating", config.DEFAULT_GATING)),
